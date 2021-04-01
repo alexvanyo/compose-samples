@@ -44,7 +44,7 @@ import com.example.owl.model.topics
 import com.example.owl.ui.MainDestinations
 
 fun NavGraphBuilder.courses(
-    onCourseSelected: (Long) -> Unit,
+    onCourseSelected: @Composable () -> ((Long) -> Unit),
     onboardingComplete: State<Boolean>, // https://issuetracker.google.com/174783110
     navController: NavHostController,
     modifier: Modifier = Modifier
@@ -57,11 +57,11 @@ fun NavGraphBuilder.courses(
             }
         }
         if (onboardingComplete.value) { // Avoid glitch when showing onboarding
-            FeaturedCourses(courses, onCourseSelected, modifier)
+            FeaturedCourses(courses, onCourseSelected(), modifier)
         }
     }
     composable(CourseTabs.MY_COURSES.route) {
-        MyCourses(courses, onCourseSelected, modifier)
+        MyCourses(courses, onCourseSelected(), modifier)
     }
     composable(CourseTabs.SEARCH.route) {
         SearchCourses(topics, modifier)
