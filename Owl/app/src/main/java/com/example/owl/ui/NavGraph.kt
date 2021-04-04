@@ -19,9 +19,12 @@ package com.example.owl.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -61,9 +64,16 @@ fun NavGraph(
     val onboardingComplete = remember(showOnboardingInitially) {
         mutableStateOf(!showOnboardingInitially)
     }
+    val tokenizedNavController = navController.tokenizedNavController(
+        initialToken = UUID.randomUUID()
+    )
+    val actions = remember(tokenizedNavController) { MainActions(tokenizedNavController) }
+    val previousBackStackEntry by navController.previousBackStackEntryAsState()
 
-    val actions = remember(navController) { MainActions(navController) }
-    val tokenState = navController.currentBackStackToken()
+    BackHandler(
+        enabled = previousBackStackEntry != null,
+        onBack = actions.backPress()
+    )
 
     NavHost(
         navController = navController,
@@ -75,7 +85,7 @@ fun NavGraph(
                 finishActivity()
             }
 
-            val onboardingCompleteLambda = actions.onboardingComplete(tokenState)
+            val onboardingCompleteLambda = actions.onboardingComplete()
 
             Onboarding(
                 onboardingComplete = {
@@ -90,7 +100,7 @@ fun NavGraph(
             startDestination = CourseTabs.FEATURED.route
         ) {
             courses(
-                onCourseSelected = { actions.selectCourse(tokenState) },
+                onCourseSelected = { actions.selectCourse() },
                 onboardingComplete = onboardingComplete,
                 navController = navController,
                 modifier = modifier
@@ -105,75 +115,71 @@ fun NavGraph(
             val arguments = requireNotNull(backStackEntry.arguments)
             CourseDetails(
                 courseId = arguments.getLong(COURSE_DETAIL_ID_KEY),
-                selectCourse = actions.selectCourse(tokenState),
-                upPress = actions.upPress(tokenState),
+                selectCourse = actions.selectCourse(),
+                upPress = actions.upPress(),
             )
         }
     }
 }
 
 /**
- * Returns a [State] of [UUID] that represents a unique token for the current back stack state.
+ * Models the navigation actions in the app.
+ */
+class MainActions(tokenizedNavController: TokenizedNavController<UUID>) {
+    val onboardingComplete = tokenizedNavController.createActionGetter { currentToken ->
+        // Update the token if navigation succeeded.
+        if (popBackStack()) {
+            UUID.randomUUID()
+        } else {
+            currentToken
+        }
+    }
+
+    val selectCourse = tokenizedNavController.createActionGetter { _, courseId: Long ->
+        navigate("${MainDestinations.COURSE_DETAIL_ROUTE}/$courseId")
+        UUID.randomUUID()
+    }
+
+    val upPress = tokenizedNavController.createActionGetter { currentToken ->
+        // Update the token if navigation succeeded.
+        if (navigateUp()) {
+            UUID.randomUUID()
+        } else {
+            currentToken
+        }
+    }
+
+    val backPress = tokenizedNavController.createActionGetter { currentToken ->
+        // Update the token if navigation succeeded.
+        if (popBackStack()) {
+            UUID.randomUUID()
+        } else {
+            currentToken
+        }
+    }
+}
+
+/**
+ * Gets the previous navigation back stack entry as a [MutableState]. When the given navController
+ * changes the back stack due to a [NavController.navigate] or [NavController.popBackStack] this
+ * will trigger a recompose and return the previous entry on the back stack.
  *
- * Whenever the backstack changes, a new [UUID] will be created, triggering a recompose.
+ * @return a mutable state of the previous back stack entry
  */
 @Composable
-fun NavController.currentBackStackToken(): State<UUID> {
-    val currentBackStackToken = remember { mutableStateOf(UUID.randomUUID()) }
-
+fun NavController.previousBackStackEntryAsState(): State<NavBackStackEntry?> {
+    val previousBackStackEntry = remember { mutableStateOf(previousBackStackEntry) }
+    // setup the onDestinationChangedListener responsible for detecting when the
+    // current back stack entry changes
     DisposableEffect(this) {
-        val callback = NavController.OnDestinationChangedListener { _, _, _ ->
-            currentBackStackToken.value = UUID.randomUUID()
+        val callback = NavController.OnDestinationChangedListener { controller, _, _ ->
+            previousBackStackEntry.value = controller.previousBackStackEntry
         }
         addOnDestinationChangedListener(callback)
+        // remove the navController on dispose (i.e. when the composable is destroyed)
         onDispose {
             removeOnDestinationChangedListener(callback)
         }
     }
-    return currentBackStackToken
-}
-
-/**
- * Models the navigation actions in the app.
- */
-class MainActions(
-    private val navController: NavHostController,
-) {
-    fun onboardingComplete(tokenState: State<UUID>): () -> Unit =
-        stateCheck(tokenState) { ->
-            navController.popBackStack()
-        }
-    fun selectCourse(tokenState: State<UUID>): (Long) -> Unit =
-        stateCheck(tokenState) { courseId: Long ->
-            navController.navigate("${MainDestinations.COURSE_DETAIL_ROUTE}/$courseId")
-        }
-    fun upPress(tokenState: State<UUID>): () -> Unit = stateCheck(tokenState) { ->
-        navController.navigateUp()
-    }
-}
-
-/**
- * Wraps the [block] lambda in a state check.
- *
- * When this method is called, the current [State.value] of [state] will be queried.
- * When the return lambda is called, the [State.value] of [state] will be queried again.
- *
- * If those two values match, then [block] will be invoked. Otherwise, nothing will happen.
- */
-private fun <S> stateCheck(state: State<S>, block: () -> Unit): () -> Unit {
-    val value = state.value
-    return { if (state.value == value) block() }
-}
-
-/**
- * Wraps the [block] lambda in a token check.
- *
- * When this method is called, the current [State.value] of [state] will be queried.
- * When the return lambda is called, the [State.value] of [state] will be queried again.
- *
- * If those two values match, then [block] will be invoked. Otherwise, nothing will happen.
- */
-private fun <S, T1> stateCheck(state: State<S>, block: (T1) -> Unit): (T1) -> Unit {
-    val value = state.value
-    return { t1 -> if (state.value == value) block(t1) }
+    return previousBackStackEntry
 }
