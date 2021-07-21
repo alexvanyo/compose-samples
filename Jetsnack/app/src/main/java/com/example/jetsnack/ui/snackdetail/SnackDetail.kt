@@ -39,12 +39,7 @@ import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -76,6 +71,7 @@ import com.example.jetsnack.ui.utils.formatPrice
 import com.example.jetsnack.ui.utils.mirroringBackIcon
 import com.google.accompanist.insets.navigationBarsPadding
 import com.google.accompanist.insets.statusBarsPadding
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 
@@ -93,6 +89,7 @@ private val HzPadding = Modifier.padding(horizontal = 24.dp)
 @Composable
 fun SnackDetail(
     snackId: Long,
+    showSnackbar: suspend (String) -> Unit,
     upPress: () -> Unit
 ) {
     val snack = remember(snackId) { SnackRepo.getSnack(snackId) }
@@ -105,7 +102,7 @@ fun SnackDetail(
         Title(snack, scroll.value)
         Image(snack.imageUrl, scroll.value)
         Up(upPress)
-        CartBottomBar(modifier = Modifier.align(Alignment.BottomCenter))
+        CartBottomBar(modifier = Modifier.align(Alignment.BottomCenter), showSnackbar = showSnackbar)
     }
 }
 
@@ -329,8 +326,14 @@ private fun CollapsingImageLayout(
 }
 
 @Composable
-private fun CartBottomBar(modifier: Modifier = Modifier) {
+private fun CartBottomBar(
+    modifier: Modifier = Modifier,
+    showSnackbar: suspend (String) -> Unit,
+) {
     val (count, updateCount) = remember { mutableStateOf(1) }
+
+    val coroutineScope = rememberCoroutineScope()
+
     JetsnackSurface(modifier) {
         Column {
             JetsnackDivider()
@@ -343,8 +346,18 @@ private fun CartBottomBar(modifier: Modifier = Modifier) {
             ) {
                 QuantitySelector(
                     count = count,
-                    decreaseItemCount = { if (count > 0) updateCount(count - 1) },
-                    increaseItemCount = { updateCount(count + 1) }
+                    decreaseItemCount = {
+                        if (count > 0) updateCount(count - 1)
+                        coroutineScope.launch {
+                            showSnackbar("${count - 1}")
+                        }
+                    },
+                    increaseItemCount = {
+                        updateCount(count + 1)
+                        coroutineScope.launch {
+                            showSnackbar("${count + 1}")
+                        }
+                    }
                 )
                 Spacer(Modifier.width(16.dp))
                 JetsnackButton(
@@ -359,6 +372,7 @@ private fun CartBottomBar(modifier: Modifier = Modifier) {
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(60.dp))
         }
     }
 }
@@ -371,6 +385,7 @@ private fun SnackDetailPreview() {
     JetsnackTheme {
         SnackDetail(
             snackId = 1L,
+            showSnackbar = { },
             upPress = { }
         )
     }

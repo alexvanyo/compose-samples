@@ -68,6 +68,9 @@ fun JetsnackNavGraph(
             val snackId = arguments.getLong(SNACK_ID_KEY)
             SnackDetail(
                 snackId = snackId,
+                showSnackbar = { message ->
+                    scaffoldStateHolder.showSnackbar(message)
+                },
                 upPress = {
                     scaffoldStateHolder.onBackPress()
                 }

@@ -16,6 +16,7 @@
 
 package com.example.jetsnack.ui
 
+import android.util.Log
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.ScaffoldState
 import androidx.compose.material.SnackbarHostState
@@ -39,10 +40,10 @@ import com.example.jetsnack.ui.theme.JetsnackTheme
 import com.google.accompanist.insets.ProvideWindowInsets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -90,6 +91,7 @@ private fun rememberScaffoldStateHolder(
             navController, snackbarHostState, coroutineScope, lifecycle
         )
     ) {
+        Log.d("SNACKBAR", "Created scaffold state holder")
         ScaffoldStateHolder(
             navController, scaffoldState.snackbarHostState, coroutineScope, lifecycle, listOf()
         )
@@ -111,7 +113,7 @@ class ScaffoldStateHolder(
     val tabs = HomeSections.values()
 
     // Queue a maximum of 3 snackbar messages
-    private val snackbarMessages = StateChannel<String>(3, BufferOverflow.DROP_OLDEST)
+    private val snackbarMessages = PendingMessagesStateToEventProducer<String>(3)
 
     init {
         coroutineScope.launch {
@@ -122,6 +124,7 @@ class ScaffoldStateHolder(
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 snackbarMessages.stream
                     .collect { message ->
+                        Log.d("SNACKBAR", "Showing snackbar: $message")
                         snackbarHostState.showSnackbar(message)
                     }
             }
@@ -150,8 +153,12 @@ class ScaffoldStateHolder(
             coroutineScope: CoroutineScope,
             lifecycle: Lifecycle
         ) = listSaver<ScaffoldStateHolder, String>(
-            save = { it.snackbarMessages.pendingElements },
+            save = {
+                Log.d("SNACKBAR", "saving: ${it.snackbarMessages.state}")
+                it.snackbarMessages.state
+            },
             restore = { pendingMessages ->
+                Log.d("SNACKBAR", "restored: $pendingMessages")
                 ScaffoldStateHolder(
                     navController, snackbarHostState, coroutineScope, lifecycle, pendingMessages
                 )
@@ -161,41 +168,131 @@ class ScaffoldStateHolder(
 }
 
 /**
- * Implementation of a Channel whose buffered elements can be accessed synchronously so that they
- * can be saved/restored on activity and process recreation.
+ * A producer of events from state.
  *
- * In this implementation, the exposed `stream` flow is supposed to be collected once at a time
- * since in case there are multiple collectors, only one will get the event.
- * If events need to be broadcasted to multiple collectors, expose stream using the `.shareIn`
- * operator instead.
+ * This class performs a delicate handshake of acting upon state to produce events, and by the act
+ * of creating an event, updates the state.
  *
- * @param capacity capacity of the underlying Channel. This should be a non-negative integer,
- * and not one of the Channel.* constants.
- * @param onBufferOverflow configures an action on buffer overflow.
+ * This class keeps a state of [A], with the initial value of [initialState].
+ *
+ * Elements of type [X] can be sent via [send], and will be combined with the current state [A]
+ * to produce a new state [A] with [elementToState].
+ *
+ * Once sent, these elements must be thought of as "state", since the elements may not be
+ * handled immediately, depending on the requirements of the consumer.
+ *
+ * This state can be persisted through recreation and process death by retrieving it
+ * synchronously via [state].
+ *
+ * In order to convert the elements back into an event, a [stream] of elements is provided.
+ * This stream is special: the act of collecting an event from the stream consumes it, creating a
+ * new state, as governed by [stateToElement] returning [StateToElementResult.ProducedElement].
+ *
+ * In other words, as soon as the collector receives an element [Y], this producer considers the
+ * event handled.
+ *
+ * If your collector never suspends, this will guarantee that an element will be removed
+ * from the list if and only if the handler runs.
+ *
+ * However, if your collector suspends, that suspension point may result in everything after the
+ * suspension point to not be run, even though the event is removed from the list.
+ * In particular, a pausing dispatcher (like `launchWhenResumed`) will consume the element if the
+ * state requirement isn't met, causing the event to be consumed even if nothing else gets a chance
+ * to run.
+ *
+ * If the stored state provides for no elements, [StateToElementResult.NoProducedElement] should
+ * be returned by [stateToElement]. This corresponds with the underlying state not changing,
+ * indicating that there is nothing to do until a new element is sent.
  */
-class StateChannel<T>(
-    private val capacity: Int,
-    private val onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND
+open class StateToEventProducer<A, X, Y>(
+    initialState: A,
+    private val elementToState: suspend (X, A) -> A,
+    private val stateToElement: suspend (A) -> StateToElementResult<A, Y>
 ) {
-    // Cache of the Channel buffer used to restore state
-    val pendingElements = mutableListOf<T>()
-    private val pendingElementsMutex = Mutex()
 
-    private val _channel = Channel<T>(capacity, onBufferOverflow)
-    val stream = _channel
-        .receiveAsFlow()
-        .onEach { pendingElementsMutex.withLock { pendingElements.removeFirstOrNull() } }
+    /**
+     * The state for elements that haven't yet been consumed.
+     */
+    var state = initialState
+        private set
 
-    suspend fun send(element: T) {
-        _channel.send(element)
-        pendingElementsMutex.withLock {
-            pendingElements.add(element)
-            if (onBufferOverflow == BufferOverflow.DROP_OLDEST) {
-                while (pendingElements.size > capacity) { pendingElements.removeFirstOrNull() }
-            } else if (onBufferOverflow == BufferOverflow.DROP_LATEST) {
-                while (pendingElements.size > capacity) { pendingElements.removeLastOrNull() }
+    private val stateMutex = Mutex()
+
+    /**
+     * A [MutableSharedFlow] that purely acts as a "trigger" to look at the state again for ongoing
+     * collectors.
+     */
+    private val stateUpdatedPing = MutableSharedFlow<Unit>(
+        replay = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    ).apply {
+        tryEmit(Unit)
+    }
+
+    val stream: Flow<Y> = stateUpdatedPing
+        .transform {
+            val element = stateMutex.withLock {
+                when (val result = stateToElement(state)) {
+                    is StateToElementResult.NoProducedElement -> return@transform
+                    is StateToElementResult.ProducedElement -> {
+                        state = result.newState
+                        result.element
+                    }
+                }
             }
+            // The state was updated, so send out another ping to handle it
+            stateUpdatedPing.tryEmit(Unit)
+            emit(element)
         }
+
+    suspend fun send(element: X) {
+        stateMutex.withLock {
+            state = elementToState(element, state)
+        }
+        // The state was updated, so send out another ping to handle it
+        stateUpdatedPing.tryEmit(Unit)
+    }
+
+    sealed class StateToElementResult<out A, out Y> {
+        data class ProducedElement<A, Y>(
+            val element: Y,
+            val newState: A,
+        ) : StateToElementResult<A, Y>()
+
+        object NoProducedElement : StateToElementResult<Nothing, Nothing>()
+    }
+}
+
+/**
+ * A simple producer of events from state, where elements are enqueued, with a maximum [capacity].
+ *
+ * This class keeps a list of pending elements [T], with the given [capacity].
+ *
+ * Elements can be sent via [send], and if the list of pending elements exceeds the given
+ * [capacity], the oldest elements will be dropped.
+ *
+ * Any dropped elements are guaranteed to _not_ be handled.
+ */
+class PendingMessagesStateToEventProducer<T>(
+    private val capacity: Int,
+): StateToEventProducer<List<T>, T, T>(
+    initialState = emptyList(),
+    elementToState = { element, list ->
+        (list + element).takeLast(capacity)
+    },
+    stateToElement = { list ->
+        if (list.isEmpty()) {
+            StateToElementResult.NoProducedElement
+        } else {
+            StateToElementResult.ProducedElement(
+                element = list.first(),
+                newState = list.drop(1)
+            )
+        }
+    }
+) {
+    init {
+        require(capacity >= 0)
     }
 }
 
