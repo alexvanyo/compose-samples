@@ -16,23 +16,28 @@
 
 package com.example.jetsnack.ui
 
+import android.content.Context
 import android.util.Log
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.ScaffoldState
 import androidx.compose.material.SnackbarHostState
 import androidx.compose.material.rememberScaffoldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
-import com.example.jetsnack.ui.ScaffoldStateHolder.Companion.ScaffoldStateHolderSaver
 import com.example.jetsnack.ui.components.JetsnackScaffold
 import com.example.jetsnack.ui.home.HomeSections
 import com.example.jetsnack.ui.home.JetsnackBottomBar
@@ -40,10 +45,7 @@ import com.example.jetsnack.ui.theme.JetsnackTheme
 import com.google.accompanist.insets.ProvideWindowInsets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -82,18 +84,24 @@ private fun rememberScaffoldStateHolder(
 ): ScaffoldStateHolder {
     val navController = rememberNavController()
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val snackbarHostState = scaffoldState.snackbarHostState
 
-    return rememberSaveable(
-        inputs = arrayOf(navController, snackbarHostState, coroutineScope, lifecycle),
-        saver = ScaffoldStateHolderSaver(
-            navController, snackbarHostState, coroutineScope, lifecycle
-        )
-    ) {
+//    return rememberSaveable(
+//        inputs = arrayOf(navController, snackbarHostState, coroutineScope, context, lifecycle),
+//        saver = ScaffoldStateHolderSaver(
+//            navController, snackbarHostState, coroutineScope, lifecycle
+//        )
+//    ) {
+//
+//
+//    }
+
+    return remember {
         Log.d("SNACKBAR", "Created scaffold state holder")
         ScaffoldStateHolder(
-            navController, scaffoldState.snackbarHostState, coroutineScope, lifecycle, listOf()
+            navController, scaffoldState.snackbarHostState, context, coroutineScope, lifecycle, listOf()
         )
     }
 }
@@ -105,6 +113,7 @@ private fun rememberScaffoldStateHolder(
 class ScaffoldStateHolder(
     val navController: NavHostController,
     private val snackbarHostState: SnackbarHostState,
+    context: Context,
     coroutineScope: CoroutineScope,
     lifecycle: Lifecycle,
     initialSnackbarMessages: List<String>
@@ -113,7 +122,7 @@ class ScaffoldStateHolder(
     val tabs = HomeSections.values()
 
     // Queue a maximum of 3 snackbar messages
-    private val snackbarMessages = PendingMessagesStateToEventProducer<String>(3)
+    private val snackbarMessages = DataStoreMessagesStateToEventProducer(3, context)
 
     init {
         coroutineScope.launch {
@@ -145,26 +154,27 @@ class ScaffoldStateHolder(
     fun onBackPress() {
         navController.navigateUp()
     }
-
-    companion object {
-        fun ScaffoldStateHolderSaver(
-            navController: NavHostController,
-            snackbarHostState: SnackbarHostState,
-            coroutineScope: CoroutineScope,
-            lifecycle: Lifecycle
-        ) = listSaver<ScaffoldStateHolder, String>(
-            save = {
-                Log.d("SNACKBAR", "saving: ${it.snackbarMessages.state}")
-                it.snackbarMessages.state
-            },
-            restore = { pendingMessages ->
-                Log.d("SNACKBAR", "restored: $pendingMessages")
-                ScaffoldStateHolder(
-                    navController, snackbarHostState, coroutineScope, lifecycle, pendingMessages
-                )
-            }
-        )
-    }
+//
+//    companion object {
+//        fun ScaffoldStateHolderSaver(
+//            navController: NavHostController,
+//            snackbarHostState: SnackbarHostState,
+//            coroutineScope: CoroutineScope,
+//            context: Context,
+//            lifecycle: Lifecycle
+//        ) = listSaver<ScaffoldStateHolder, String>(
+//            save = {
+//                Log.d("SNACKBAR", "saving: ${it.snackbarMessages.state}")
+//                it.snackbarMessages.state
+//            },
+//            restore = { pendingMessages ->
+//                Log.d("SNACKBAR", "restored: $pendingMessages")
+//                ScaffoldStateHolder(
+//                    navController, snackbarHostState, coroutineScope, context, lifecycle, pendingMessages
+//                )
+//            }
+//        )
+//    }
 }
 
 /**
@@ -204,10 +214,13 @@ class ScaffoldStateHolder(
  * be returned by [stateToElement]. This corresponds with the underlying state not changing,
  * indicating that there is nothing to do until a new element is sent.
  */
-open class StateToEventProducer<A, X, Y>(
+open class LocalStateToEventProducer<A, X, Y>(
     initialState: A,
     private val elementToState: suspend (X, A) -> A,
     private val stateToElement: suspend (A) -> StateToElementResult<A, Y>
+) : StateToEventProducer<A, X, Y>(
+    elementToState,
+    stateToElement,
 ) {
 
     /**
@@ -216,6 +229,61 @@ open class StateToEventProducer<A, X, Y>(
     var state = initialState
         private set
 
+    override suspend fun <T> runStateTransaction(
+        stateTransaction: suspend StateTransaction<A>.() -> T
+    ): T =
+        with(object : StateTransaction<A> {
+            override fun getState(): A = state
+
+            override fun setState(state: A) {
+                this@LocalStateToEventProducer.state = state
+            }
+        }) {
+            stateTransaction()
+        }
+}
+
+/**
+ * A producer of events from state.
+ *
+ * This class performs a delicate handshake of acting upon state to produce events, and by the act
+ * of creating an event, updates the state.
+ *
+ * This class keeps a state of [A], with the initial value of [initialState].
+ *
+ * Elements of type [X] can be sent via [send], and will be combined with the current state [A]
+ * to produce a new state [A] with [elementToState].
+ *
+ * Once sent, these elements must be thought of as "state", since the elements may not be
+ * handled immediately, depending on the requirements of the consumer.
+ *
+ * This state can be persisted through recreation and process death by retrieving it
+ * synchronously via [state].
+ *
+ * In order to convert the elements back into an event, a [stream] of elements is provided.
+ * This stream is special: the act of collecting an event from the stream consumes it, creating a
+ * new state, as governed by [stateToElement] returning [StateToElementResult.ProducedElement].
+ *
+ * In other words, as soon as the collector receives an element [Y], this producer considers the
+ * event handled.
+ *
+ * If your collector never suspends, this will guarantee that an element will be removed
+ * from the list if and only if the handler runs.
+ *
+ * However, if your collector suspends, that suspension point may result in everything after the
+ * suspension point to not be run, even though the event is removed from the list.
+ * In particular, a pausing dispatcher (like `launchWhenResumed`) will consume the element if the
+ * state requirement isn't met, causing the event to be consumed even if nothing else gets a chance
+ * to run.
+ *
+ * If the stored state provides for no elements, [StateToElementResult.NoProducedElement] should
+ * be returned by [stateToElement]. This corresponds with the underlying state not changing,
+ * indicating that there is nothing to do until a new element is sent.
+ */
+abstract class StateToEventProducer<A, X, Y>(
+    private val elementToState: suspend (X, A) -> A,
+    private val stateToElement: suspend (A) -> StateToElementResult<A, Y>
+) {
     private val stateMutex = Mutex()
 
     /**
@@ -231,26 +299,49 @@ open class StateToEventProducer<A, X, Y>(
 
     val stream: Flow<Y> = stateUpdatedPing
         .transform {
-            val element = stateMutex.withLock {
-                when (val result = stateToElement(state)) {
-                    is StateToElementResult.NoProducedElement -> return@transform
-                    is StateToElementResult.ProducedElement -> {
-                        state = result.newState
-                        result.element
+            val result = stateMutex.withLock {
+                runStateTransaction {
+                    val oldState = getState()
+                    val result = stateToElement(oldState)
+                    when (result) {
+                        is StateToElementResult.NoProducedElement -> Unit
+                        is StateToElementResult.ProducedElement -> {
+                            setState(result.newState)
+                        }
                     }
+                    result
                 }
             }
+
+            val element = when (result) {
+                is StateToElementResult.NoProducedElement -> return@transform
+                is StateToElementResult.ProducedElement -> result.element
+            }
+
             // The state was updated, so send out another ping to handle it
             stateUpdatedPing.tryEmit(Unit)
             emit(element)
         }
 
+    protected abstract suspend fun <T> runStateTransaction(
+        stateTransaction: suspend StateTransaction<A>.() -> T
+    ): T
+
     suspend fun send(element: X) {
         stateMutex.withLock {
-            state = elementToState(element, state)
+            runStateTransaction {
+                val oldState = getState()
+                val newState = elementToState(element, oldState)
+                setState(newState)
+            }
         }
         // The state was updated, so send out another ping to handle it
         stateUpdatedPing.tryEmit(Unit)
+    }
+
+    interface StateTransaction<T> {
+        fun getState(): T
+        fun setState(state: T)
     }
 
     sealed class StateToElementResult<out A, out Y> {
@@ -275,7 +366,7 @@ open class StateToEventProducer<A, X, Y>(
  */
 class PendingMessagesStateToEventProducer<T>(
     private val capacity: Int,
-): StateToEventProducer<List<T>, T, T>(
+): LocalStateToEventProducer<List<T>, T, T>(
     initialState = emptyList(),
     elementToState = { element, list ->
         (list + element).takeLast(capacity)
@@ -295,6 +386,54 @@ class PendingMessagesStateToEventProducer<T>(
         require(capacity >= 0)
     }
 }
+
+class DataStoreMessagesStateToEventProducer(
+    private val capacity: Int,
+    private val context: Context
+) : StateToEventProducer<List<String>, String, String>(
+    elementToState = { element, list ->
+        (list + element).takeLast(capacity)
+    },
+    stateToElement = { list ->
+        if (list.isEmpty()) {
+            StateToElementResult.NoProducedElement
+        } else {
+            StateToElementResult.ProducedElement(
+                element = list.first(),
+                newState = list.drop(1)
+            )
+        }
+    }
+) {
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun <T> runStateTransaction(
+        stateTransaction: suspend StateTransaction<List<String>>.() -> T
+    ): T {
+        var result: T? = null
+        context.dataStore.edit { mutablePreferences ->
+            result = with(
+                // Note: very silly serialization logic (assuming no `,` in strings, etc.)
+                object : StateTransaction<List<String>> {
+                    override fun getState(): List<String> =
+                        mutablePreferences[stringPreferencesKey("test")]
+                            ?.split(",")
+                            .orEmpty()
+                            .filter { it.isNotEmpty() }
+
+                    override fun setState(state: List<String>) {
+                        mutablePreferences[stringPreferencesKey("test")] =
+                            state.joinToString(",")
+                    }
+                }
+            ) {
+                stateTransaction()
+            }
+        }
+        return result as T
+    }
+}
+
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "test")
 
 /**
  * If the lifecycle is not resumed it means this NavBackStackEntry already processed a nav event.
