@@ -62,11 +62,6 @@ object Libs {
             const val uiTest = "androidx.compose.ui:ui-test-junit4:$version"
         }
 
-        object DataStore {
-            const val dataStorePreferences =
-                "androidx.datastore:datastore-preferences:1.0.0"
-        }
-
         object Activity {
             const val activityCompose = "androidx.activity:activity-compose:1.3.1"
         }
