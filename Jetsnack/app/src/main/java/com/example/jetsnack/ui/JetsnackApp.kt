@@ -39,14 +39,11 @@ import com.example.jetsnack.ui.home.JetsnackBottomBar
 import com.example.jetsnack.ui.theme.JetsnackTheme
 import com.google.accompanist.insets.ProvideWindowInsets
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 @Composable
 fun JetsnackApp() {
@@ -98,6 +95,7 @@ private fun rememberScaffoldStateHolder(
     }
 }
 
+
 /**
  * State holder for Jetsnack's app scaffold that contains state related to [JetsnackScaffold], and
  * handles Navigation and Snackbar events.
@@ -112,8 +110,13 @@ class ScaffoldStateHolder(
     // Tabs for JetsnackBottomBar
     val tabs = HomeSections.values()
 
+    private val snackbarMessagesState = MutableStateFlow(emptyList<String>())
+
     // Queue a maximum of 3 snackbar messages
-    private val snackbarMessages = PendingMessagesStateToEventProducer<String>(3)
+    private val snackbarMessages = PendingMessagesStateToEventProducer(
+        snackbarMessagesState,
+        3
+    )
 
     init {
         coroutineScope.launch {
@@ -122,16 +125,15 @@ class ScaffoldStateHolder(
 
             // Process snackbar events only when the lifecycle is at least STARTED
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                snackbarMessages.stream
-                    .collect { message ->
-                        Log.d("SNACKBAR", "Showing snackbar: $message")
-                        snackbarHostState.showSnackbar(message)
-                    }
+                snackbarMessages.handleElements { message ->
+                    Log.d("SNACKBAR", "Showing snackbar: $message")
+                    snackbarHostState.showSnackbar(message)
+                }
             }
         }
     }
 
-    suspend fun showSnackbar(message: String) {
+    fun showSnackbar(message: String) {
         snackbarMessages.send(message)
     }
 
@@ -154,8 +156,8 @@ class ScaffoldStateHolder(
             lifecycle: Lifecycle
         ) = listSaver<ScaffoldStateHolder, String>(
             save = {
-                Log.d("SNACKBAR", "saving: ${it.snackbarMessages.state}")
-                it.snackbarMessages.state
+                Log.d("SNACKBAR", "saving: ${it.snackbarMessagesState.value}")
+                it.snackbarMessagesState.value
             },
             restore = { pendingMessages ->
                 Log.d("SNACKBAR", "restored: $pendingMessages")
@@ -173,7 +175,7 @@ class ScaffoldStateHolder(
  * This class performs a delicate handshake of acting upon state to produce events, and by the act
  * of creating an event, updates the state.
  *
- * This class keeps a state of [A], with the initial value of [initialState].
+ * This class manages a [MutableStateFlow] of [A].
  *
  * Elements of type [X] can be sent via [send], and will be combined with the current state [A]
  * to produce a new state [A] with [elementToState].
@@ -181,76 +183,70 @@ class ScaffoldStateHolder(
  * Once sent, these elements must be thought of as "state", since the elements may not be
  * handled immediately, depending on the requirements of the consumer.
  *
- * This state can be persisted through recreation and process death by retrieving it
- * synchronously via [state].
+ * This state can be persisted through recreation and process death by backing the [stateFlow] by
+ * some form of saved instance state.
  *
- * In order to convert the elements back into an event, a [stream] of elements is provided.
- * This stream is special: the act of collecting an event from the stream consumes it, creating a
- * new state, as governed by [stateToElement] returning [StateToElementResult.ProducedElement].
+ * In order to convert the elements back into an event, observers can call [handleElements].
+ * This suspending function will listen for updates, and handle produced events using the provided
+ * handler [block].
  *
- * In other words, as soon as the collector receives an element [Y], this producer considers the
- * event handled.
+ * The state-to-event contract is setup so the block will be called if and only if an event was
+ * produced, thereby updating the backing state. In other words, as soon as the handler receives an
+ * element [Y], this producer considers the event handled.
  *
- * If your collector never suspends, this will guarantee that an element will be removed
- * from the list if and only if the handler runs.
- *
- * However, if your collector suspends, that suspension point may result in everything after the
- * suspension point to not be run, even though the event is removed from the list.
- * In particular, a pausing dispatcher (like `launchWhenResumed`) will consume the element if the
- * state requirement isn't met, causing the event to be consumed even if nothing else gets a chance
- * to run.
+ * [block] is allowed to be suspending. However, if it is, then there is no guarantee that all
+ * of the suspending work will be done to handle the event.
  *
  * If the stored state provides for no elements, [StateToElementResult.NoProducedElement] should
  * be returned by [stateToElement]. This corresponds with the underlying state not changing,
  * indicating that there is nothing to do until a new element is sent.
  */
 open class StateToEventProducer<A, X, Y>(
-    initialState: A,
-    private val elementToState: suspend (X, A) -> A,
-    private val stateToElement: suspend (A) -> StateToElementResult<A, Y>
+    val stateFlow: MutableStateFlow<A>,
+    val elementToState: (X, A) -> A,
+    val stateToElement: (A) -> StateToElementResult<A, Y>
 ) {
+    suspend inline fun handleElements(
+        crossinline block: suspend (Y) -> Unit
+    ) {
+        stateFlow
+            .onEach {
+                // Ignore the onEach state, since we're going to be using a CAS loop below
 
-    /**
-     * The state for elements that haven't yet been consumed.
-     */
-    var state = initialState
-        private set
+                // Keep track of the final result, which will be set by the "winning"/final
+                // iteration of the loop
+                var result: StateToElementResult<A, Y>
 
-    private val stateMutex = Mutex()
+                // CAS loop. Don't use MutableStateFlow.update here, since we are keeping track of
+                // the result directly
+                while (true) {
+                    val prevValue = stateFlow.value
+                    result = stateToElement(prevValue)
+                    val nextValue = when (result) {
+                        is StateToElementResult.NoProducedElement -> prevValue
+                        is StateToElementResult.ProducedElement -> result.newState
+                    }
 
-    /**
-     * A [MutableSharedFlow] that purely acts as a "trigger" to look at the state again for ongoing
-     * collectors.
-     */
-    private val stateUpdatedPing = MutableSharedFlow<Unit>(
-        replay = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    ).apply {
-        tryEmit(Unit)
-    }
+                    if (stateFlow.compareAndSet(prevValue, nextValue)) {
+                        break
+                    }
+                }
 
-    val stream: Flow<Y> = stateUpdatedPing
-        .transform {
-            val element = stateMutex.withLock {
-                when (val result = stateToElement(state)) {
-                    is StateToElementResult.NoProducedElement -> return@transform
+                // With the winning result, handle the produced element.
+                when (result) {
+                    is StateToElementResult.NoProducedElement -> Unit
                     is StateToElementResult.ProducedElement -> {
-                        state = result.newState
-                        result.element
+                        block(result.element)
                     }
                 }
             }
-            // The state was updated, so send out another ping to handle it
-            stateUpdatedPing.tryEmit(Unit)
-            emit(element)
-        }
+            .collect()
+    }
 
-    suspend fun send(element: X) {
-        stateMutex.withLock {
-            state = elementToState(element, state)
+    fun send(element: X) {
+        stateFlow.update { state ->
+            elementToState(element, state)
         }
-        // The state was updated, so send out another ping to handle it
-        stateUpdatedPing.tryEmit(Unit)
     }
 
     sealed class StateToElementResult<out A, out Y> {
@@ -274,9 +270,10 @@ open class StateToEventProducer<A, X, Y>(
  * Any dropped elements are guaranteed to _not_ be handled.
  */
 class PendingMessagesStateToEventProducer<T>(
+    stateFlow: MutableStateFlow<List<T>> = MutableStateFlow(emptyList()),
     private val capacity: Int,
 ): StateToEventProducer<List<T>, T, T>(
-    initialState = emptyList(),
+    stateFlow = stateFlow,
     elementToState = { element, list ->
         (list + element).takeLast(capacity)
     },
