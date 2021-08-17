@@ -212,35 +212,40 @@ open class StateToEventProducer<A, X, Y>(
         stateFlow
             .onEach {
                 // Ignore the onEach state, since we're going to be using a CAS loop below
-
-                // Keep track of the final result, which will be set by the "winning"/final
-                // iteration of the loop
-                var result: StateToElementResult<A, Y>
-
-                // CAS loop. Don't use MutableStateFlow.update here, since we are keeping track of
-                // the result directly
-                while (true) {
-                    val prevValue = stateFlow.value
-                    result = stateToElement(prevValue)
-                    val nextValue = when (result) {
-                        is StateToElementResult.NoProducedElement -> prevValue
-                        is StateToElementResult.ProducedElement -> result.newState
-                    }
-
-                    if (stateFlow.compareAndSet(prevValue, nextValue)) {
-                        break
-                    }
-                }
-
-                // With the winning result, handle the produced element.
-                when (result) {
-                    is StateToElementResult.NoProducedElement -> Unit
-                    is StateToElementResult.ProducedElement -> {
-                        block(result.element)
-                    }
-                }
+                handleElement(block)
             }
             .collect()
+    }
+
+    suspend inline fun handleElement(
+        crossinline block: suspend (Y) -> Unit
+    ) {
+        // Keep track of the final result, which will be set by the "winning"/final
+        // iteration of the loop
+        var result: StateToElementResult<A, Y>
+
+        // CAS loop. Don't use MutableStateFlow.update here, since we are keeping track of
+        // the result directly
+        while (true) {
+            val prevValue = stateFlow.value
+            result = stateToElement(prevValue)
+            val nextValue = when (result) {
+                is StateToElementResult.NoProducedElement -> prevValue
+                is StateToElementResult.ProducedElement -> result.newState
+            }
+
+            if (stateFlow.compareAndSet(prevValue, nextValue)) {
+                break
+            }
+        }
+
+        // With the winning result, handle the produced element.
+        when (result) {
+            is StateToElementResult.NoProducedElement -> Unit
+            is StateToElementResult.ProducedElement -> {
+                block(result.element)
+            }
+        }
     }
 
     fun send(element: X) {
