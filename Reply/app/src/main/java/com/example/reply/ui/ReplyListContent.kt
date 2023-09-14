@@ -17,111 +17,622 @@
 package com.example.reply.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.gestures.snapTo
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidthIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.adaptive.AdaptiveLayoutDirective
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.GutterSizes
 import androidx.compose.material3.adaptive.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.ListDetailPaneScaffoldRole
+import androidx.compose.material3.adaptive.ListDetailPaneScaffoldState
+import androidx.compose.material3.adaptive.PaneAdaptedValue
+import androidx.compose.material3.adaptive.ThreePaneScaffoldValue
+import androidx.compose.material3.adaptive.WindowAdaptiveInfo
+import androidx.compose.material3.adaptive.calculateWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.rememberListDetailPaneScaffoldState
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import com.example.reply.data.Email
 import com.example.reply.ui.components.EmailDetailAppBar
 import com.example.reply.ui.components.ReplyDockedSearchBar
 import com.example.reply.ui.components.ReplyEmailListItem
 import com.example.reply.ui.components.ReplyEmailThreadItem
-import com.example.reply.ui.utils.ReplyContentType
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+val minPaneWidth = 250.dp
+val fullInnerVerticalGutter = 24.dp
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReplyInboxScreenCAMAL(
-    contentType: ReplyContentType,
     replyHomeUIState: ReplyHomeUIState,
-    closeDetailScreen: () -> Unit,
-    navigateToDetail: (Long, ReplyContentType) -> Unit,
+    navigateToDetail: (Long) -> Unit,
     toggleSelectedEmail: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    /**
-     * When moving from LIST_AND_DETAIL page to LIST page clear the selection and user should see LIST screen.
-     */
-    val layoutState =
-        rememberListDetailPaneScaffoldState(initialFocus = ListDetailPaneScaffoldRole.List)
-    LaunchedEffect(key1 = contentType) {
-        if (contentType == ReplyContentType.SINGLE_PANE && !replyHomeUIState.isDetailOnlyOpen) {
-            closeDetailScreen()
-        } else {
-            layoutState. navigateTo(ListDetailPaneScaffoldRole.Detail)
-        }
-    }
-
     val emailLazyListState = rememberLazyListState()
+    val density = LocalDensity.current
 
+    BoxWithConstraints {
 
-    ListDetailPaneScaffold(
-        layoutState = layoutState,
-        listPane = {
-            ReplyEmailList(
-                emails = replyHomeUIState.emails,
-                openedEmail = replyHomeUIState.openedEmail,
-                selectedEmailIds = replyHomeUIState.selectedEmails,
-                toggleEmailSelection = toggleSelectedEmail,
-                emailLazyListState = emailLazyListState,
-                navigateToDetail = { id, contentType ->
-                    navigateToDetail.invoke(id, contentType)
-                    layoutState.navigateTo(ListDetailPaneScaffoldRole.Detail)
+        var isInitialAnchors by remember { mutableStateOf(false) }
+        val anchors = remember(constraints.maxWidth, density) {
+            val min = 0f
+            val max = constraints.maxWidth.toFloat() - with(density) { 48.dp.toPx() }
+
+            val diffToPreserveMinSize =
+                minPaneWidth + fullInnerVerticalGutter / 2
+
+            val middleMin = with(density) { min + diffToPreserveMinSize.toPx() }
+            val middleMax = with(density) { max - diffToPreserveMinSize.toPx() }
+            val hasMiddle = middleMin <= middleMax
+
+            // Create a DraggableAnchors with a large continuous interval in the middle, where
+            // every point is a valid anchor. The valid anchor set looks like:
+            // +    +--------------+    +
+            // TODO: Check if this is a good idea with Jossi
+            object : DraggableAnchors<DraggablePaneType> {
+                /**
+                 * TODO: This isn't really true? The middle anchor is a large continuous
+                 *       one
+                 */
+                override val size: Int = 3
+
+                override fun closestAnchor(position: Float): DraggablePaneType =
+                    if (hasMiddle) {
+                        if (position < (min + middleMin) / 2) {
+                            DraggablePaneType.DetailMax
+                        } else if (position < (max + middleMax) / 2) {
+                            DraggablePaneType.Split(
+                                with(density) {
+                                    position.coerceIn(middleMin, middleMax).toDp()
+                                }
+                            )
+                        } else {
+                            DraggablePaneType.ListMax
+                        }
+                    } else {
+                        if (position < (min + max) / 2) {
+                            DraggablePaneType.DetailMax
+                        } else {
+                            DraggablePaneType.ListMax
+                        }
+                    }
+
+                override fun closestAnchor(
+                    position: Float,
+                    searchUpwards: Boolean
+                ): DraggablePaneType? =
+                    if (searchUpwards) {
+                        if (hasMiddle) {
+                            if (position <= min) {
+                                DraggablePaneType.DetailMax
+                            } else if (position < (max + middleMax) / 2) {
+                                DraggablePaneType.Split(
+                                    with(density) {
+                                        position.coerceIn(middleMin, middleMax).toDp()
+                                    }
+                                )
+                            } else if (position <= max) {
+                                DraggablePaneType.ListMax
+                            } else {
+                                null
+                            }
+                        } else {
+                            if (position <= min) {
+                                DraggablePaneType.DetailMax
+                            } else if (position <= max) {
+                                DraggablePaneType.ListMax
+                            } else {
+                                null
+                            }
+                        }
+                    } else {
+                        if (hasMiddle) {
+                            if (position < min) {
+                                null
+                            } else if (position < (min + middleMin) / 2) {
+                                DraggablePaneType.DetailMax
+                            } else if (position < max) {
+                                DraggablePaneType.Split(
+                                    with(density) {
+                                        position.coerceIn(middleMin, middleMax).toDp()
+                                    }
+                                )
+                            } else {
+                                DraggablePaneType.ListMax
+                            }
+                        } else {
+                            if (position < min) {
+                                null
+                            } else if (position <= max) {
+                                DraggablePaneType.DetailMax
+                            } else {
+                                DraggablePaneType.ListMax
+                            }
+                        }
+                    }
+
+                override fun maxAnchor(): Float = max
+
+                override fun minAnchor(): Float = min
+
+                override fun positionOf(value: DraggablePaneType): Float =
+                    when (value) {
+                        DraggablePaneType.DetailMax -> min
+                        DraggablePaneType.ListMax -> max
+                        is DraggablePaneType.Split -> with(density) {
+                            value.listPreferredWidth.toPx()
+                        }
+                    }
+
+                override fun hasAnchorFor(value: DraggablePaneType): Boolean =
+                    when (value) {
+                        DraggablePaneType.DetailMax -> true
+                        DraggablePaneType.ListMax -> true
+                        is DraggablePaneType.Split -> with(density) {
+                            value.listPreferredWidth in
+                                    middleMin.toDp()..middleMax.toDp()
+                        }
+                    }
+            }
+        }
+
+        val anchoredDraggableState = rememberSaveable(
+            saver = Saver<AnchoredDraggableState<DraggablePaneType>, List<Any>>(
+                save = {
+                    when (val currentValue = it.currentValue) {
+                        DraggablePaneType.DetailMax -> listOf(0)
+                        DraggablePaneType.ListMax -> listOf(1)
+                        is DraggablePaneType.Split -> listOf(2, currentValue.listPreferredWidth)
+                    }
+                },
+                restore = {
+                    AnchoredDraggableState(
+                        initialValue = when (it[0] as Int) {
+                            0 -> DraggablePaneType.DetailMax
+                            1 -> DraggablePaneType.ListMax
+                            2 -> DraggablePaneType.Split(it[1] as Dp)
+                            else -> error("unknown type!")
+                        },
+                        animationSpec = spring(),
+                        anchors = anchors,
+                        confirmValueChange = { true },
+                        positionalThreshold = { distance: Float -> distance * 0.5f },
+                        velocityThreshold = { with(density) { 400.dp.toPx() } },
+                    )
                 }
             )
-        },
-        detailPane = {
-            ReplyEmailDetail(
-                email = replyHomeUIState.openedEmail ?: replyHomeUIState.emails.first(),
-                isFullScreen = false
+        ) {
+            AnchoredDraggableState<DraggablePaneType>(
+                initialValue = DraggablePaneType.Split(262.dp),
+                anchors = anchors,
+                positionalThreshold = { distance: Float -> distance * 0.5f },
+                velocityThreshold = { with(density) { 400.dp.toPx() } },
+                animationSpec = spring(),
             )
         }
-    )
+
+
+        var isFocusedOnDetail by rememberSaveable { mutableStateOf(false) }
+
+        DisposableEffect(anchoredDraggableState.currentValue, anchoredDraggableState.isAnimationRunning) {
+            if (!anchoredDraggableState.isAnimationRunning) {
+                when (anchoredDraggableState.currentValue) {
+                    DraggablePaneType.DetailMax -> {
+                        isFocusedOnDetail = true
+                    }
+                    DraggablePaneType.ListMax -> {
+                        isFocusedOnDetail = false
+                    }
+                    is DraggablePaneType.Split -> {
+                        // do nothing
+                    }
+                }
+            }
+            onDispose {}
+        }
+
+        val layoutDirectives = calculateCustomAdaptiveLayoutDirective(
+            anchoredDraggableState,
+            calculateWindowAdaptiveInfo()
+        )
+
+        val coroutineScope = rememberCoroutineScope()
+
+        val listDetailLayoutState = object : ListDetailPaneScaffoldState {
+            override val layoutDirective: AdaptiveLayoutDirective
+                get() = layoutDirectives
+            override val layoutValue: ThreePaneScaffoldValue
+                get() = if (layoutDirective.maxHorizontalPartitions >= 2) {
+                    ThreePaneScaffoldValue(
+                        primary = PaneAdaptedValue.Expanded,
+                        secondary = PaneAdaptedValue.Expanded,
+                        tertiary = PaneAdaptedValue.Hidden
+                    )
+                } else {
+                    ThreePaneScaffoldValue(
+                        primary = if (isFocusedOnDetail) {
+                            PaneAdaptedValue.Expanded
+                        } else {
+                            PaneAdaptedValue.Hidden
+                        },
+                        secondary = if (isFocusedOnDetail) {
+                            PaneAdaptedValue.Hidden
+                        } else {
+                            PaneAdaptedValue.Expanded
+                        },
+                        tertiary = PaneAdaptedValue.Hidden
+                    )
+                }
+
+            override fun canNavigateBack(layoutValueMustChange: Boolean): Boolean =
+                isFocusedOnDetail || (
+                        layoutDirective.maxHorizontalPartitions >= 2 &&
+                                anchoredDraggableState.currentValue == DraggablePaneType.DetailMax &&
+                                !anchoredDraggableState.isAnimationRunning
+                        )
+
+            override fun navigateBack(popUntilLayoutValueChange: Boolean): Boolean =
+                if (layoutDirective.maxHorizontalPartitions >= 2) {
+                    if (anchoredDraggableState.currentValue == DraggablePaneType.DetailMax &&
+                        !anchoredDraggableState.isAnimationRunning) {
+                        coroutineScope.launch {
+                            anchoredDraggableState.animateTo(
+                                anchoredDraggableState.anchors.closestAnchor(
+                                    anchoredDraggableState.anchors.maxAnchor(),
+                                )!!
+                            )
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else if (isFocusedOnDetail) {
+                    isFocusedOnDetail = false
+                    if (anchoredDraggableState.currentValue == DraggablePaneType.DetailMax &&
+                        !anchoredDraggableState.isAnimationRunning) {
+                        coroutineScope.launch {
+                            anchoredDraggableState.snapTo(
+                                anchoredDraggableState.anchors.closestAnchor(
+                                    anchoredDraggableState.anchors.maxAnchor(),
+                                )!!
+                            )
+                        }
+                        true
+                    }
+                    true
+                } else {
+                    false
+                }
+
+            override fun navigateTo(pane: ListDetailPaneScaffoldRole) {
+                when (pane) {
+                    ListDetailPaneScaffoldRole.List -> {
+                        isFocusedOnDetail = false
+                    }
+                    ListDetailPaneScaffoldRole.Detail -> {
+                        isFocusedOnDetail = true
+                    }
+                    ListDetailPaneScaffoldRole.Extra -> {
+
+                    }
+                }
+            }
+
+        }
+
+        BackHandler(enabled = listDetailLayoutState.canNavigateBack()) {
+            listDetailLayoutState.navigateBack()
+        }
+
+        ListDetailPaneScaffold(
+            layoutState = listDetailLayoutState,
+            listPane = {
+                val listPreferredWidth = anchoredDraggableState.requireOffset()
+
+                Box(
+                    // TODO: Could we do some sort of preferred weight here?
+                    modifier = Modifier
+                        .preferredWidth(
+                            with(density) {
+                                listPreferredWidth
+                                    .coerceAtLeast(0.0001f)
+                                    .toDp()
+                            }
+                        )
+                        .clipToBounds(),
+                ) {
+                    ReplyEmailList(
+                        emails = replyHomeUIState.emails,
+                        openedEmail = replyHomeUIState.openedEmail,
+                        selectedEmailIds = replyHomeUIState.selectedEmails,
+                        toggleEmailSelection = toggleSelectedEmail,
+                        emailLazyListState = emailLazyListState,
+                        navigateToDetail = { id ->
+                            navigateToDetail.invoke(id)
+                            listDetailLayoutState.navigateTo(ListDetailPaneScaffoldRole.Detail)
+                            if (anchoredDraggableState.currentValue == DraggablePaneType.ListMax) {
+                                coroutineScope.launch {
+                                    anchoredDraggableState.animateTo(
+                                        anchoredDraggableState.anchors.closestAnchor(
+                                            anchoredDraggableState.anchors.minAnchor(),
+                                        )!!
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .layout { measurable, constraints ->
+                                val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
+                                val placeable = measurable.measure(
+                                    constraints.copy(
+                                        minWidth = minPaneWidth.roundToPx(),
+                                        maxWidth = width
+                                    )
+                                )
+                                layout(width, placeable.height) {
+                                    placeable.placeRelative(max(width - constraints.maxWidth, 0) / 2, 0)
+                                }
+                            }
+                    )
+                }
+            },
+            detailPane = {
+                val detailPreferredWidth =
+                    constraints.maxWidth -
+                            with(density) {
+                                listDetailLayoutState.layoutDirective.gutterSizes.outerVertical.toPx() * 2
+                            } - anchoredDraggableState.requireOffset()
+
+
+                Box(
+                    modifier = Modifier
+                        .preferredWidth(
+                            with(density) {
+                                detailPreferredWidth
+                                    .coerceAtLeast(0.0001f)
+                                    .toDp()
+                            }
+                        )
+                        .clipToBounds(),
+                ) {
+                    ReplyEmailDetail(
+                        email = replyHomeUIState.openedEmail ?: replyHomeUIState.emails.first(),
+                        isFullScreen = false,
+                        modifier = Modifier
+                            .layout { measurable, constraints ->
+                                val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
+                                val placeable = measurable.measure(
+                                    constraints.copy(
+                                        minWidth = minPaneWidth.roundToPx(),
+                                        maxWidth = width
+                                    )
+                                )
+                                layout(width, placeable.height) {
+                                    placeable.placeRelative(-max(width - constraints.maxWidth, 0) / 2, 0)
+                                }
+                            }
+                    )
+                }
+            },
+            modifier = modifier,
+        )
+
+
+        if (listDetailLayoutState.isListVisible && listDetailLayoutState.isDetailVisible) {
+            DisposableEffect(anchors) {
+                if (isInitialAnchors) {
+                    isInitialAnchors = false
+                } else {
+                    anchoredDraggableState.updateAnchors(anchors)
+                }
+                onDispose {}
+            }
+
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                val interactionSource = remember { MutableInteractionSource() }
+
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .offset(x = -32.dp)
+                        .offset {
+                            IntOffset(
+                                anchoredDraggableState
+                                    .requireOffset()
+                                    .roundToInt(),
+                                0
+                            )
+                        }
+                        .anchoredDraggable(
+                            state = anchoredDraggableState,
+                            orientation = Orientation.Horizontal,
+                            interactionSource = interactionSource,
+                        )
+                        .systemGestureExclusion()
+                ) {
+                    val isHovered by interactionSource.collectIsHoveredAsState()
+                    val isPressed by interactionSource.collectIsPressedAsState()
+                    val isDragged by interactionSource.collectIsDraggedAsState()
+                    val isActive = isHovered || isPressed || isDragged
+
+                    val width by animateDpAsState(
+                        if (isActive) 12.dp else 4.dp
+                    )
+                    val color by animateColorAsState(
+                        if (isActive) Color.DarkGray else Color.LightGray
+                    )
+
+                    Canvas(
+                        modifier = Modifier.fillMaxSize()
+//                            .offset {
+//                                val progress =
+//                                    (anchoredDraggableState.requireOffset() -
+//                                            anchoredDraggableState.anchors.minAnchor()) /
+//                                            (anchoredDraggableState.anchors.maxAnchor() -
+//                                                    anchoredDraggableState.anchors.minAnchor())
+//
+//                                IntOffset(
+//                                    -((progress * 2 - 1) * 16.dp.toPx()).roundToInt(),
+//                                    0
+//                                )
+//                            }
+                    ) {
+                        val height = 48.dp
+                        val rectSize = DpSize(width, height).toSize()
+
+                        drawRoundRect(
+                            color = color,
+                            topLeft = Offset(
+                                (size.width - rectSize.width) / 2,
+                                (size.height - rectSize.height) / 2,
+                            ),
+                            size = rectSize,
+                            cornerRadius = CornerRadius(rectSize.width / 2f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+sealed interface DraggablePaneType {
+    object ListMax : DraggablePaneType
+    object DetailMax : DraggablePaneType
+    data class Split(
+        val listPreferredWidth: Dp
+    ) : DraggablePaneType
 }
 
 
 @Composable
-fun ReplySinglePaneContent(
-    replyHomeUIState: ReplyHomeUIState,
-    toggleEmailSelection: (Long) -> Unit,
-    emailLazyListState: LazyListState,
-    modifier: Modifier = Modifier,
-    closeDetailScreen: () -> Unit,
-    navigateToDetail: (Long, ReplyContentType) -> Unit
-) {
-    if (replyHomeUIState.openedEmail != null && replyHomeUIState.isDetailOnlyOpen) {
-        BackHandler {
-            closeDetailScreen()
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3AdaptiveApi::class)
+fun calculateCustomAdaptiveLayoutDirective(
+    anchoredDraggableState: AnchoredDraggableState<DraggablePaneType>,
+    windowAdaptiveInfo: WindowAdaptiveInfo,
+): AdaptiveLayoutDirective {
+    val maxHorizontalPartitions: Int
+    val gutterOuterVertical: Dp
+    val gutterInnerVertical: Dp
+    when (windowAdaptiveInfo.windowSizeClass.widthSizeClass) {
+        WindowWidthSizeClass.Compact -> {
+            maxHorizontalPartitions = 1
+            gutterOuterVertical = 16.dp
+            gutterInnerVertical = 0.dp
         }
-        ReplyEmailDetail(email = replyHomeUIState.openedEmail) {
-            closeDetailScreen()
+        WindowWidthSizeClass.Medium -> {
+            maxHorizontalPartitions = 1
+            gutterOuterVertical = 24.dp
+            gutterInnerVertical = 0.dp
         }
-    } else {
-        ReplyEmailList(
-            emails = replyHomeUIState.emails,
-            openedEmail = replyHomeUIState.openedEmail,
-            selectedEmailIds = replyHomeUIState.selectedEmails,
-            toggleEmailSelection = toggleEmailSelection,
-            emailLazyListState = emailLazyListState,
-            modifier = modifier,
-            navigateToDetail = navigateToDetail
-        )
+        else -> {
+            maxHorizontalPartitions = 2
+            gutterOuterVertical = 24.dp
+
+            val distanceFromMinAnchor =
+                with(LocalDensity.current) {
+                    abs(anchoredDraggableState.anchors.minAnchor() - anchoredDraggableState.requireOffset()).toDp()
+                }
+            val distanceFromMaxAnchor =
+                with(LocalDensity.current) {
+                    abs(anchoredDraggableState.anchors.maxAnchor() - anchoredDraggableState.requireOffset()).toDp()
+                }
+            gutterInnerVertical = min(fullInnerVerticalGutter, min(distanceFromMinAnchor, distanceFromMaxAnchor))
+        }
     }
+    val maxVerticalPartitions: Int
+    val gutterInnerHorizontal: Dp
+
+    // TODO(conradchen): Confirm the table top mode settings
+    if (windowAdaptiveInfo.posture.isTabletop) {
+        maxVerticalPartitions = 2
+        gutterInnerHorizontal = 24.dp
+    } else {
+        maxVerticalPartitions = 1
+        gutterInnerHorizontal = 0.dp
+    }
+
+    return AdaptiveLayoutDirective(
+        maxHorizontalPartitions,
+        GutterSizes(
+            gutterOuterVertical, gutterInnerVertical, innerHorizontal = gutterInnerHorizontal
+        ),
+        maxVerticalPartitions,
+        emptyList()
+    )
 }
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+val ListDetailPaneScaffoldState.isDetailVisible get() =
+    layoutValue.primary == PaneAdaptedValue.Expanded
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+val ListDetailPaneScaffoldState.isListVisible get() =
+    layoutValue.secondary == PaneAdaptedValue.Expanded
 
 @Composable
 fun ReplyEmailList(
@@ -131,13 +642,13 @@ fun ReplyEmailList(
     toggleEmailSelection: (Long) -> Unit,
     emailLazyListState: LazyListState,
     modifier: Modifier = Modifier,
-    navigateToDetail: (Long, ReplyContentType) -> Unit
+    navigateToDetail: (Long) -> Unit
 ) {
     Box(modifier = modifier) {
         ReplyDockedSearchBar(
             emails = emails,
             onSearchItemSelected = { searchedEmail ->
-                navigateToDetail(searchedEmail.id, ReplyContentType.SINGLE_PANE)
+                navigateToDetail(searchedEmail.id)
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -154,7 +665,7 @@ fun ReplyEmailList(
                 ReplyEmailListItem(
                     email = email,
                     navigateToDetail = { emailId ->
-                        navigateToDetail(emailId, ReplyContentType.SINGLE_PANE)
+                        navigateToDetail(emailId)
                     },
                     toggleSelection = toggleEmailSelection,
                     isOpened = openedEmail?.id == email.id,

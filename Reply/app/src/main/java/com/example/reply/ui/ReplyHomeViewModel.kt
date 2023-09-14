@@ -56,14 +56,13 @@ class ReplyHomeViewModel(private val emailsRepository: EmailsRepository = Emails
         }
     }
 
-    fun setOpenedEmail(emailId: Long, contentType: ReplyContentType) {
+    fun setOpenedEmail(emailId: Long) {
         /**
          * We only set isDetailOnlyOpen to true when it's only single pane layout
          */
         val email = uiState.value.emails.find { it.id == emailId }
         _uiState.value = _uiState.value.copy(
             openedEmail = email,
-            isDetailOnlyOpen = contentType == ReplyContentType.SINGLE_PANE
         )
     }
 
@@ -74,21 +73,12 @@ class ReplyHomeViewModel(private val emailsRepository: EmailsRepository = Emails
                 currentSelection.minus(emailId) else currentSelection.plus(emailId)
         )
     }
-
-    fun closeDetailScreen() {
-        _uiState.value = _uiState
-            .value.copy(
-                isDetailOnlyOpen = false,
-                openedEmail = _uiState.value.emails.first()
-            )
-    }
 }
 
 data class ReplyHomeUIState(
     val emails: List<Email> = emptyList(),
     val selectedEmails: Set<Long> = emptySet(),
     val openedEmail: Email? = null,
-    val isDetailOnlyOpen: Boolean = false,
     val loading: Boolean = false,
     val error: String? = null
 )

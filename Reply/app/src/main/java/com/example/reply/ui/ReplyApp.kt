@@ -22,16 +22,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.Posture
 import androidx.compose.material3.adaptive.calculateWindowAdaptiveInfo
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.windowsizeclass.WindowHeightSizeClass
-import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,8 +40,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.window.layout.DisplayFeature
-import androidx.window.layout.FoldingFeature
 import com.example.reply.ui.navigation.ModalNavigationDrawerContent
 import com.example.reply.ui.navigation.PermanentNavigationDrawerContent
 import com.example.reply.ui.navigation.ReplyBottomNavigationBar
@@ -52,25 +47,22 @@ import com.example.reply.ui.navigation.ReplyNavigationActions
 import com.example.reply.ui.navigation.ReplyNavigationRail
 import com.example.reply.ui.navigation.ReplyRoute
 import com.example.reply.ui.navigation.ReplyTopLevelDestination
-import com.example.reply.ui.utils.ReplyContentType
 import com.example.reply.ui.utils.ReplyNavigationContentPosition
 import com.example.reply.ui.utils.ReplyNavigationType
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class)
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun ReplyApp(
     replyHomeUIState: ReplyHomeUIState,
-    closeDetailScreen: () -> Unit = {},
-    navigateToDetail: (Long, ReplyContentType) -> Unit = { _, _ -> },
-    toggleSelectedEmail: (Long) -> Unit = { }
+    navigateToDetail: (Long) -> Unit = {},
+    toggleSelectedEmail: (Long) -> Unit = {}
 ) {
     /**
      * This will help us select type of navigation and content type depending on window size and
      * fold state of the device.
      */
     val navigationType: ReplyNavigationType
-    val contentType: ReplyContentType
 
     /**
      * We are using display's folding features to map the device postures a fold is in.
@@ -79,32 +71,19 @@ fun ReplyApp(
      */
 
     val windowSize = calculateWindowAdaptiveInfo().windowSizeClass
-    val devicePosture = calculateWindowAdaptiveInfo().posture
 
-    when (windowSize.widthSizeClass) {
+    navigationType = when (windowSize.widthSizeClass) {
         WindowWidthSizeClass.Compact -> {
-            navigationType = ReplyNavigationType.BOTTOM_NAVIGATION
-            contentType = ReplyContentType.SINGLE_PANE
+            ReplyNavigationType.BOTTOM_NAVIGATION
         }
         WindowWidthSizeClass.Medium -> {
-            navigationType = ReplyNavigationType.NAVIGATION_RAIL
-            contentType = if (devicePosture.hasVerticalHinge) {
-                ReplyContentType.DUAL_PANE
-            } else {
-                ReplyContentType.SINGLE_PANE
-            }
+            ReplyNavigationType.NAVIGATION_RAIL
         }
         WindowWidthSizeClass.Expanded -> {
-            navigationType = if (devicePosture.hasVerticalHinge) {
-                ReplyNavigationType.NAVIGATION_RAIL
-            } else {
-                ReplyNavigationType.PERMANENT_NAVIGATION_DRAWER
-            }
-            contentType = ReplyContentType.DUAL_PANE
+            ReplyNavigationType.NAVIGATION_RAIL
         }
         else -> {
-            navigationType = ReplyNavigationType.BOTTOM_NAVIGATION
-            contentType = ReplyContentType.SINGLE_PANE
+            ReplyNavigationType.BOTTOM_NAVIGATION
         }
     }
 
@@ -127,24 +106,19 @@ fun ReplyApp(
 
     ReplyNavigationWrapper(
         navigationType = navigationType,
-        contentType = contentType,
         navigationContentPosition = navigationContentPosition,
         replyHomeUIState = replyHomeUIState,
-        closeDetailScreen = closeDetailScreen,
         navigateToDetail = navigateToDetail,
         toggleSelectedEmail = toggleSelectedEmail
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReplyNavigationWrapper(
     navigationType: ReplyNavigationType,
-    contentType: ReplyContentType,
     navigationContentPosition: ReplyNavigationContentPosition,
     replyHomeUIState: ReplyHomeUIState,
-    closeDetailScreen: () -> Unit,
-    navigateToDetail: (Long, ReplyContentType) -> Unit,
+    navigateToDetail: (Long) -> Unit,
     toggleSelectedEmail: (Long) -> Unit
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -169,13 +143,11 @@ private fun ReplyNavigationWrapper(
         }) {
             ReplyAppContent(
                 navigationType = navigationType,
-                contentType = contentType,
                 navigationContentPosition = navigationContentPosition,
                 replyHomeUIState = replyHomeUIState,
                 navController = navController,
                 selectedDestination = selectedDestination,
                 navigateToTopLevelDestination = navigationActions::navigateTo,
-                closeDetailScreen = closeDetailScreen,
                 navigateToDetail = navigateToDetail,
                 toggleSelectedEmail = toggleSelectedEmail
             )
@@ -198,13 +170,11 @@ private fun ReplyNavigationWrapper(
         ) {
             ReplyAppContent(
                 navigationType = navigationType,
-                contentType = contentType,
                 navigationContentPosition = navigationContentPosition,
                 replyHomeUIState = replyHomeUIState,
                 navController = navController,
                 selectedDestination = selectedDestination,
                 navigateToTopLevelDestination = navigationActions::navigateTo,
-                closeDetailScreen = closeDetailScreen,
                 navigateToDetail = navigateToDetail,
                 toggleSelectedEmail = toggleSelectedEmail
             ) {
@@ -220,14 +190,12 @@ private fun ReplyNavigationWrapper(
 fun ReplyAppContent(
     modifier: Modifier = Modifier,
     navigationType: ReplyNavigationType,
-    contentType: ReplyContentType,
     navigationContentPosition: ReplyNavigationContentPosition,
     replyHomeUIState: ReplyHomeUIState,
     navController: NavHostController,
     selectedDestination: String,
     navigateToTopLevelDestination: (ReplyTopLevelDestination) -> Unit,
-    closeDetailScreen: () -> Unit,
-    navigateToDetail: (Long, ReplyContentType) -> Unit,
+    navigateToDetail: (Long) -> Unit,
     toggleSelectedEmail: (Long) -> Unit,
     onDrawerClicked: () -> Unit = {}
 ) {
@@ -247,9 +215,7 @@ fun ReplyAppContent(
         ) {
             ReplyNavHost(
                 navController = navController,
-                contentType = contentType,
                 replyHomeUIState = replyHomeUIState,
-                closeDetailScreen = closeDetailScreen,
                 navigateToDetail = navigateToDetail,
                 toggleSelectedEmail = toggleSelectedEmail,
                 modifier = Modifier.weight(1f),
@@ -267,10 +233,8 @@ fun ReplyAppContent(
 @Composable
 private fun ReplyNavHost(
     navController: NavHostController,
-    contentType: ReplyContentType,
     replyHomeUIState: ReplyHomeUIState,
-    closeDetailScreen: () -> Unit,
-    navigateToDetail: (Long, ReplyContentType) -> Unit,
+    navigateToDetail: (Long) -> Unit,
     toggleSelectedEmail: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -281,9 +245,7 @@ private fun ReplyNavHost(
     ) {
         composable(ReplyRoute.INBOX) {
             ReplyInboxScreenCAMAL(
-                contentType = contentType,
                 replyHomeUIState = replyHomeUIState,
-                closeDetailScreen = closeDetailScreen,
                 navigateToDetail = navigateToDetail,
                 toggleSelectedEmail = toggleSelectedEmail
             )
