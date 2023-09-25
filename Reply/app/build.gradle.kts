@@ -24,7 +24,8 @@ android {
     namespace = "com.example.reply"
 
     defaultConfig {
-        applicationId = "com.example.reply"
+//        applicationId = "com.example.reply"
+         applicationId = "com.example.reply.control"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
