@@ -496,7 +496,7 @@ fun ReplyInboxScreenCAMAL(
         )
 
 
-        if (false && listDetailLayoutState.isListVisible && listDetailLayoutState.isDetailVisible) {
+        if (listDetailLayoutState.isListVisible && listDetailLayoutState.isDetailVisible) {
             Column(
                 Modifier
                     .fillMaxSize()
