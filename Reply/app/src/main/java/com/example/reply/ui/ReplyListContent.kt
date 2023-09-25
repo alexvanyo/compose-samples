@@ -289,7 +289,6 @@ fun ReplyInboxScreenCAMAL(
                         isFocusedOnDetail = false
                     }
                     is DraggablePaneType.Split -> {
-                        isFocusedOnDetail = false
                     }
                 }
             }
@@ -338,7 +337,7 @@ fun ReplyInboxScreenCAMAL(
                 }
 
             override fun canNavigateBack(layoutValueMustChange: Boolean): Boolean =
-                isFocusedOnDetail || (
+                (layoutDirective.maxHorizontalPartitions == 1 && isFocusedOnDetail) || (
                         layoutDirective.maxHorizontalPartitions >= 2 &&
                                 anchoredDraggableState.currentValue == DraggablePaneType.DetailMax &&
                                 !anchoredDraggableState.isAnimationRunning
