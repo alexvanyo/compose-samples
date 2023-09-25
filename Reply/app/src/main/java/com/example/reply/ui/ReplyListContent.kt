@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.min
 import com.example.reply.data.Email
 import com.example.reply.ui.components.EmailDetailAppBar
@@ -119,8 +120,12 @@ fun ReplyInboxScreenCAMAL(
             val diffToPreserveMinSize =
                 minPaneWidth + fullInnerVerticalGutter / 2
 
-            val middleMin = with(density) { min + diffToPreserveMinSize.toPx() }
-            val middleMax = with(density) { max - diffToPreserveMinSize.toPx() }
+            // Continuous
+//            val middleMin = with(density) { min + diffToPreserveMinSize.toPx() }
+//            val middleMax = with(density) { max - diffToPreserveMinSize.toPx() }
+
+            val middleMin = min + max / 2
+            val middleMax = middleMin
             val hasMiddle = middleMin <= middleMax
 
             // Create a DraggableAnchors with a large continuous interval in the middle, where
@@ -139,11 +144,11 @@ fun ReplyInboxScreenCAMAL(
                         if (position < (min + middleMin) / 2) {
                             DraggablePaneType.DetailMax
                         } else if (position < (max + middleMax) / 2) {
-                            DraggablePaneType.Split(
-                                with(density) {
-                                    position.coerceIn(middleMin, middleMax).toDp()
-                                }
-                            )
+//                            DraggablePaneType.Split(
+//                                (position.coerceIn(middleMin, middleMax) - middleMin) /
+//                                        (middleMax - middleMin)
+//                            )
+                            DraggablePaneType.Split(0.5f)
                         } else {
                             DraggablePaneType.ListMax
                         }
@@ -164,11 +169,11 @@ fun ReplyInboxScreenCAMAL(
                             if (position <= min) {
                                 DraggablePaneType.DetailMax
                             } else if (position < (max + middleMax) / 2) {
-                                DraggablePaneType.Split(
-                                    with(density) {
-                                        position.coerceIn(middleMin, middleMax).toDp()
-                                    }
-                                )
+//                                DraggablePaneType.Split(
+//                                    (position.coerceIn(middleMin, middleMax) - middleMin) /
+//                                            (middleMax - middleMin)
+//                                )
+                                DraggablePaneType.Split(0.5f)
                             } else if (position <= max) {
                                 DraggablePaneType.ListMax
                             } else {
@@ -190,11 +195,11 @@ fun ReplyInboxScreenCAMAL(
                             } else if (position < (min + middleMin) / 2) {
                                 DraggablePaneType.DetailMax
                             } else if (position < max) {
-                                DraggablePaneType.Split(
-                                    with(density) {
-                                        position.coerceIn(middleMin, middleMax).toDp()
-                                    }
-                                )
+//                                DraggablePaneType.Split(
+//                                    (position.coerceIn(middleMin, middleMax) - middleMin) /
+//                                            (middleMax - middleMin)
+//                                )
+                                DraggablePaneType.Split(0.5f)
                             } else {
                                 DraggablePaneType.ListMax
                             }
@@ -218,7 +223,11 @@ fun ReplyInboxScreenCAMAL(
                         DraggablePaneType.DetailMax -> min
                         DraggablePaneType.ListMax -> max
                         is DraggablePaneType.Split -> with(density) {
-                            value.listPreferredWidth.toPx()
+                            lerp(
+                                middleMin.toDp(),
+                                middleMax.toDp(),
+                                value.listPreferredWeight
+                            ).toPx()
                         }
                     }
 
@@ -226,13 +235,12 @@ fun ReplyInboxScreenCAMAL(
                     when (value) {
                         DraggablePaneType.DetailMax -> true
                         DraggablePaneType.ListMax -> true
-                        is DraggablePaneType.Split -> with(density) {
-                            value.listPreferredWidth in
-                                    middleMin.toDp()..middleMax.toDp()
-                        }
+                        is DraggablePaneType.Split -> hasMiddle
                     }
             }
         }
+
+        val initialAnchor: DraggablePaneType = DraggablePaneType.Split(0.5f)
 
         val anchoredDraggableState = rememberSaveable(
             saver = Saver<AnchoredDraggableState<DraggablePaneType>, List<Any>>(
@@ -240,7 +248,7 @@ fun ReplyInboxScreenCAMAL(
                     when (val currentValue = it.currentValue) {
                         DraggablePaneType.DetailMax -> listOf(0)
                         DraggablePaneType.ListMax -> listOf(1)
-                        is DraggablePaneType.Split -> listOf(2, currentValue.listPreferredWidth)
+                        is DraggablePaneType.Split -> listOf(2, currentValue.listPreferredWeight)
                     }
                 },
                 restore = {
@@ -248,11 +256,10 @@ fun ReplyInboxScreenCAMAL(
                         initialValue = when (it[0] as Int) {
                             0 -> DraggablePaneType.DetailMax
                             1 -> DraggablePaneType.ListMax
-                            2 -> DraggablePaneType.Split(it[1] as Dp)
+                            2 -> DraggablePaneType.Split(it[1] as Float)
                             else -> error("unknown type!")
                         },
                         animationSpec = spring(),
-                        anchors = anchors,
                         confirmValueChange = { true },
                         positionalThreshold = { distance: Float -> distance * 0.5f },
                         velocityThreshold = { with(density) { 400.dp.toPx() } },
@@ -261,14 +268,14 @@ fun ReplyInboxScreenCAMAL(
             )
         ) {
             AnchoredDraggableState<DraggablePaneType>(
-                initialValue = DraggablePaneType.Split(262.dp),
-                anchors = anchors,
+                initialValue = initialAnchor,
                 positionalThreshold = { distance: Float -> distance * 0.5f },
                 velocityThreshold = { with(density) { 400.dp.toPx() } },
                 animationSpec = spring(),
             )
+        }.apply {
+            updateAnchors(anchors)
         }
-
 
         var isFocusedOnDetail by rememberSaveable { mutableStateOf(false) }
 
@@ -282,12 +289,20 @@ fun ReplyInboxScreenCAMAL(
                         isFocusedOnDetail = false
                     }
                     is DraggablePaneType.Split -> {
-                        // do nothing
+                        isFocusedOnDetail = false
                     }
                 }
             }
             onDispose {}
         }
+
+//        LaunchedEffect(constraints.maxWidth) {
+//            anchoredDraggableState.snapTo(
+//                anchors.closestAnchor(
+//                    anchors.positionOf(anchoredDraggableState.currentValue)
+//                )
+//            )
+//        }
 
         val layoutDirectives = calculateCustomAdaptiveLayoutDirective(
             anchoredDraggableState,
@@ -455,7 +470,13 @@ fun ReplyInboxScreenCAMAL(
                 ) {
                     ReplyEmailDetail(
                         email = replyHomeUIState.openedEmail ?: replyHomeUIState.emails.first(),
-                        isFullScreen = false,
+                        isFullScreen = !listDetailLayoutState.isListVisible ||
+                                anchoredDraggableState.targetValue == DraggablePaneType.DetailMax,
+                        onBackPressed = {
+                            if (listDetailLayoutState.canNavigateBack()) {
+                                listDetailLayoutState.navigateBack()
+                            }
+                        },
                         modifier = Modifier
                             .layout { measurable, constraints ->
                                 val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
@@ -477,15 +498,6 @@ fun ReplyInboxScreenCAMAL(
 
 
         if (listDetailLayoutState.isListVisible && listDetailLayoutState.isDetailVisible) {
-            DisposableEffect(anchors) {
-                if (isInitialAnchors) {
-                    isInitialAnchors = false
-                } else {
-                    anchoredDraggableState.updateAnchors(anchors)
-                }
-                onDispose {}
-            }
-
             Column(
                 Modifier
                     .fillMaxSize()
@@ -523,7 +535,11 @@ fun ReplyInboxScreenCAMAL(
                         if (isActive) 12.dp else 4.dp
                     )
                     val color by animateColorAsState(
-                        if (isActive) Color.DarkGray else Color.LightGray
+                        if (isActive) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        }
                     )
 
                     Canvas(
@@ -564,7 +580,7 @@ sealed interface DraggablePaneType {
     object ListMax : DraggablePaneType
     object DetailMax : DraggablePaneType
     data class Split(
-        val listPreferredWidth: Dp
+        val listPreferredWeight: Float
     ) : DraggablePaneType
 }
 
