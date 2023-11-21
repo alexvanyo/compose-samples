@@ -16,7 +16,9 @@
 
 package com.example.reply.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -37,34 +39,32 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidthIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.adaptive.AdaptiveLayoutDirective
+import androidx.compose.material3.adaptive.AnimatedPane
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.GutterSizes
 import androidx.compose.material3.adaptive.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.ListDetailPaneScaffoldRole
 import androidx.compose.material3.adaptive.ListDetailPaneScaffoldState
 import androidx.compose.material3.adaptive.PaneAdaptedValue
+import androidx.compose.material3.adaptive.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.ThreePaneScaffoldValue
 import androidx.compose.material3.adaptive.WindowAdaptiveInfo
-import androidx.compose.material3.adaptive.calculateWindowAdaptiveInfo
-import androidx.compose.material3.adaptive.rememberListDetailPaneScaffoldState
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,9 +77,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
@@ -96,7 +96,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-val minPaneWidth = 250.dp
 val fullInnerVerticalGutter = 24.dp
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalFoundationApi::class)
@@ -118,7 +117,7 @@ fun ReplyInboxScreenCAMAL(
             val max = constraints.maxWidth.toFloat() - with(density) { 48.dp.toPx() }
 
             val diffToPreserveMinSize =
-                minPaneWidth + fullInnerVerticalGutter / 2
+                250.dp + fullInnerVerticalGutter / 2
 
             // Continuous
 //            val middleMin = with(density) { min + diffToPreserveMinSize.toPx() }
@@ -240,6 +239,20 @@ fun ReplyInboxScreenCAMAL(
             }
         }
 
+        val minListPaneWidth = (anchors.positionOf(
+            anchors.closestAnchor(
+                anchors.minAnchor() + 0.01f,
+                searchUpwards = true
+            )!!
+        ) - anchors.minAnchor()) / 2f
+        val minDetailPaneWidth = (anchors.maxAnchor() -
+                anchors.positionOf(
+                    anchors.closestAnchor(
+                        anchors.maxAnchor() - 0.01f,
+                        searchUpwards = false
+                    )!!
+                )) / 2f
+
         val initialAnchor: DraggablePaneType = DraggablePaneType.Split(0.5f)
 
         val anchoredDraggableState = rememberSaveable(
@@ -303,18 +316,18 @@ fun ReplyInboxScreenCAMAL(
 //            )
 //        }
 
-        val layoutDirectives = calculateCustomAdaptiveLayoutDirective(
+        val scaffoldDirective = calculateCustomPaneScaffoldDirective(
             anchoredDraggableState,
-            calculateWindowAdaptiveInfo()
+            currentWindowAdaptiveInfo()
         )
 
         val coroutineScope = rememberCoroutineScope()
 
-        val listDetailLayoutState = object : ListDetailPaneScaffoldState {
-            override val layoutDirective: AdaptiveLayoutDirective
-                get() = layoutDirectives
-            override val layoutValue: ThreePaneScaffoldValue
-                get() = if (layoutDirective.maxHorizontalPartitions >= 2) {
+        val listDetailScaffoldState = object : ListDetailPaneScaffoldState {
+            override val scaffoldDirective: PaneScaffoldDirective
+                get() = scaffoldDirective
+            override val scaffoldValue: ThreePaneScaffoldValue
+                get() = if (scaffoldDirective.maxHorizontalPartitions >= 2) {
                     ThreePaneScaffoldValue(
                         primary = PaneAdaptedValue.Expanded,
                         secondary = PaneAdaptedValue.Expanded,
@@ -336,15 +349,15 @@ fun ReplyInboxScreenCAMAL(
                     )
                 }
 
-            override fun canNavigateBack(layoutValueMustChange: Boolean): Boolean =
-                (layoutDirective.maxHorizontalPartitions == 1 && isFocusedOnDetail) || (
-                        layoutDirective.maxHorizontalPartitions >= 2 &&
+            override fun canNavigateBack(scaffoldValueMustChange: Boolean): Boolean =
+                (scaffoldDirective.maxHorizontalPartitions == 1 && isFocusedOnDetail) || (
+                        scaffoldDirective.maxHorizontalPartitions >= 2 &&
                                 anchoredDraggableState.currentValue == DraggablePaneType.DetailMax &&
                                 !anchoredDraggableState.isAnimationRunning
                         )
 
-            override fun navigateBack(popUntilLayoutValueChange: Boolean): Boolean =
-                if (layoutDirective.maxHorizontalPartitions >= 2) {
+            override fun navigateBack(popUntilScaffoldValueChange: Boolean): Boolean =
+                if (scaffoldDirective.maxHorizontalPartitions >= 2) {
                     if (anchoredDraggableState.currentValue == DraggablePaneType.DetailMax &&
                         !anchoredDraggableState.isAnimationRunning) {
                         coroutineScope.launch {
@@ -392,17 +405,18 @@ fun ReplyInboxScreenCAMAL(
 
         }
 
-        BackHandler(enabled = listDetailLayoutState.canNavigateBack()) {
-            listDetailLayoutState.navigateBack()
+        BackHandler(enabled = listDetailScaffoldState.canNavigateBack()) {
+            listDetailScaffoldState.navigateBack()
         }
 
+        Log.d("vanyo", "list detail scaffold state: ${listDetailScaffoldState.scaffoldValue}")
         ListDetailPaneScaffold(
-            layoutState = listDetailLayoutState,
+            scaffoldState = listDetailScaffoldState,
             listPane = {
                 val listPreferredWidth = anchoredDraggableState.requireOffset()
 
-                Box(
-                    // TODO: Could we do some sort of preferred weight here?
+                AnimatedVisibility(
+                    paneAdaptedValue == PaneAdaptedValue.Expanded,
                     modifier = Modifier
                         .preferredWidth(
                             with(density) {
@@ -411,52 +425,61 @@ fun ReplyInboxScreenCAMAL(
                                     .toDp()
                             }
                         )
-                        .clipToBounds(),
                 ) {
-                    ReplyEmailList(
-                        emails = replyHomeUIState.emails,
-                        openedEmail = replyHomeUIState.openedEmail,
-                        selectedEmailIds = replyHomeUIState.selectedEmails,
-                        toggleEmailSelection = toggleSelectedEmail,
-                        emailLazyListState = emailLazyListState,
-                        navigateToDetail = { id ->
-                            navigateToDetail.invoke(id)
-                            listDetailLayoutState.navigateTo(ListDetailPaneScaffoldRole.Detail)
-                            if (anchoredDraggableState.currentValue == DraggablePaneType.ListMax) {
-                                coroutineScope.launch {
-                                    anchoredDraggableState.animateTo(
-                                        anchoredDraggableState.anchors.closestAnchor(
-                                            anchoredDraggableState.anchors.minAnchor(),
-                                        )!!
-                                    )
+                    Box(
+                        Modifier.clipToBounds(),
+                    ) {
+                        ReplyEmailList(
+                            emails = replyHomeUIState.emails,
+                            openedEmail = replyHomeUIState.openedEmail,
+                            selectedEmailIds = replyHomeUIState.selectedEmails,
+                            toggleEmailSelection = toggleSelectedEmail,
+                            emailLazyListState = emailLazyListState,
+                            navigateToDetail = { id ->
+                                navigateToDetail.invoke(id)
+                                listDetailScaffoldState.navigateTo(ListDetailPaneScaffoldRole.Detail)
+                                if (anchoredDraggableState.currentValue == DraggablePaneType.ListMax) {
+                                    coroutineScope.launch {
+                                        anchoredDraggableState.animateTo(
+                                            anchoredDraggableState.anchors.closestAnchor(
+                                                anchoredDraggableState.anchors.minAnchor(),
+                                            )!!
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                        modifier = Modifier
-                            .layout { measurable, constraints ->
-                                val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
-                                val placeable = measurable.measure(
-                                    constraints.copy(
-                                        minWidth = minPaneWidth.roundToPx(),
-                                        maxWidth = width
+                            },
+                            modifier = Modifier
+                                .layout { measurable, constraints ->
+                                    val width = max(minListPaneWidth.roundToInt(), constraints.maxWidth)
+                                    val placeable = measurable.measure(
+                                        constraints.copy(
+                                            minWidth = minListPaneWidth.roundToInt(),
+                                            maxWidth = width
+                                        )
                                     )
-                                )
-                                layout(width, placeable.height) {
-                                    placeable.placeRelative(max(width - constraints.maxWidth, 0) / 2, 0)
+                                    layout(width, placeable.height) {
+                                        placeable.placeRelative(max(width - constraints.maxWidth, 0) / 2, 0)
+                                    }
                                 }
-                            }
-                    )
+                        )
+                    }
+
                 }
             },
             detailPane = {
                 val detailPreferredWidth =
                     constraints.maxWidth -
                             with(density) {
-                                listDetailLayoutState.layoutDirective.gutterSizes.outerVertical.toPx() * 2
+                                listDetailScaffoldState.scaffoldDirective.gutterSizes.contentPadding.calculateLeftPadding(
+                                    LocalLayoutDirection.current
+                                ).toPx() +
+                                        listDetailScaffoldState.scaffoldDirective.gutterSizes.contentPadding.calculateRightPadding(
+                                            LocalLayoutDirection.current
+                                        ).toPx()
                             } - anchoredDraggableState.requireOffset()
 
-
-                Box(
+                AnimatedVisibility(
+                    paneAdaptedValue == PaneAdaptedValue.Expanded,
                     modifier = Modifier
                         .preferredWidth(
                             with(density) {
@@ -465,38 +488,47 @@ fun ReplyInboxScreenCAMAL(
                                     .toDp()
                             }
                         )
-                        .clipToBounds(),
                 ) {
-                    ReplyEmailDetail(
-                        email = replyHomeUIState.openedEmail ?: replyHomeUIState.emails.first(),
-                        isFullScreen = !listDetailLayoutState.isListVisible ||
-                                anchoredDraggableState.targetValue == DraggablePaneType.DetailMax,
-                        onBackPressed = {
-                            if (listDetailLayoutState.canNavigateBack()) {
-                                listDetailLayoutState.navigateBack()
-                            }
-                        },
-                        modifier = Modifier
-                            .layout { measurable, constraints ->
-                                val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
-                                val placeable = measurable.measure(
-                                    constraints.copy(
-                                        minWidth = minPaneWidth.roundToPx(),
-                                        maxWidth = width
-                                    )
-                                )
-                                layout(width, placeable.height) {
-                                    placeable.placeRelative(-max(width - constraints.maxWidth, 0) / 2, 0)
+                    Box(Modifier.clipToBounds()) {
+                        ReplyEmailDetail(
+                            email = replyHomeUIState.openedEmail ?: replyHomeUIState.emails.first(),
+                            isFullScreen = !listDetailScaffoldState.isListVisible ||
+                                    anchoredDraggableState.targetValue == DraggablePaneType.DetailMax,
+                            onBackPressed = {
+                                if (listDetailScaffoldState.canNavigateBack()) {
+                                    listDetailScaffoldState.navigateBack()
                                 }
-                            }
-                    )
+                            },
+                            modifier = Modifier
+                                .layout { measurable, constraints ->
+
+
+                                    val width =
+                                        max(minDetailPaneWidth.roundToInt(), constraints.maxWidth)
+                                    val placeable = measurable.measure(
+                                        constraints.copy(
+                                            minWidth = minDetailPaneWidth.roundToInt(),
+                                            maxWidth = width
+                                        )
+                                    )
+                                    layout(width, placeable.height) {
+                                        placeable.placeRelative(
+                                            -max(
+                                                width - constraints.maxWidth,
+                                                0
+                                            ) / 2, 0
+                                        )
+                                    }
+                                }
+                        )
+                    }
                 }
             },
             modifier = modifier,
         )
 
 
-        if (listDetailLayoutState.isListVisible && listDetailLayoutState.isDetailVisible) {
+        if (listDetailScaffoldState.isListVisible && listDetailScaffoldState.isDetailVisible) {
             Column(
                 Modifier
                     .fillMaxSize()
@@ -586,10 +618,10 @@ sealed interface DraggablePaneType {
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3AdaptiveApi::class)
-fun calculateCustomAdaptiveLayoutDirective(
+fun calculateCustomPaneScaffoldDirective(
     anchoredDraggableState: AnchoredDraggableState<DraggablePaneType>,
     windowAdaptiveInfo: WindowAdaptiveInfo,
-): AdaptiveLayoutDirective {
+): PaneScaffoldDirective {
     val maxHorizontalPartitions: Int
     val gutterOuterVertical: Dp
     val gutterInnerVertical: Dp
@@ -623,7 +655,7 @@ fun calculateCustomAdaptiveLayoutDirective(
     val gutterInnerHorizontal: Dp
 
     // TODO(conradchen): Confirm the table top mode settings
-    if (windowAdaptiveInfo.posture.isTabletop) {
+    if (windowAdaptiveInfo.windowPosture.isTabletop) {
         maxVerticalPartitions = 2
         gutterInnerHorizontal = 24.dp
     } else {
@@ -631,10 +663,12 @@ fun calculateCustomAdaptiveLayoutDirective(
         gutterInnerHorizontal = 0.dp
     }
 
-    return AdaptiveLayoutDirective(
+    return PaneScaffoldDirective(
         maxHorizontalPartitions,
         GutterSizes(
-            gutterOuterVertical, gutterInnerVertical, innerHorizontal = gutterInnerHorizontal
+            contentPadding = PaddingValues(gutterOuterVertical),
+            verticalSpacerSize = gutterInnerVertical,
+            horizontalSpacerSize = gutterInnerHorizontal
         ),
         maxVerticalPartitions,
         emptyList()
@@ -643,11 +677,11 @@ fun calculateCustomAdaptiveLayoutDirective(
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 val ListDetailPaneScaffoldState.isDetailVisible get() =
-    layoutValue.primary == PaneAdaptedValue.Expanded
+    scaffoldValue.primary == PaneAdaptedValue.Expanded
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 val ListDetailPaneScaffoldState.isListVisible get() =
-    layoutValue.secondary == PaneAdaptedValue.Expanded
+    scaffoldValue.secondary == PaneAdaptedValue.Expanded
 
 @Composable
 fun ReplyEmailList(

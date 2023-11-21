@@ -102,7 +102,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.compose.material3)
-    implementation("androidx.compose.material3:material3-adaptive-android:1.0.0-SNAPSHOT")
+    implementation("androidx.compose.material3:material3-adaptive:1.0.0-alpha01")
 
     implementation(libs.androidx.compose.materialWindow)
     implementation(libs.androidx.compose.material.iconsExtended)

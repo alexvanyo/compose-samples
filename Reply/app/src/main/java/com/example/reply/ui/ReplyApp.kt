@@ -26,7 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.calculateWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.windowsizeclass.WindowHeightSizeClass
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
@@ -70,7 +70,7 @@ fun ReplyApp(
      * at the crease/hinge
      */
 
-    val windowSize = calculateWindowAdaptiveInfo().windowSizeClass
+    val windowSize = currentWindowAdaptiveInfo().windowSizeClass
 
     navigationType = when (windowSize.widthSizeClass) {
         WindowWidthSizeClass.Compact -> {
