@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.compose)
 }
 
@@ -60,9 +63,16 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+            isIncludeAndroidResources = true
+        }
+    }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 
     buildFeatures {
@@ -78,55 +88,94 @@ android {
 }
 
 kotlin {
-    jvmToolchain(17)
-}
+    androidTarget {
+        unitTestVariant.sourceSetTree.set(KotlinSourceSetTree.test)
+        instrumentedTestVariant.sourceSetTree.set(KotlinSourceSetTree.test)
 
-dependencies {
-    val composeBom = platform(libs.androidx.compose.bom)
-    implementation(composeBom)
-    androidTestImplementation(composeBom)
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+        }
+    }
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+        }
+    }
 
-    implementation(libs.kotlin.stdlib)
-    implementation(libs.kotlinx.coroutines.android)
+    sourceSets {
+        val composeBom = project.dependencies.platform(libs.androidx.compose.bom)
+        val androidMain by getting {
+            dependencies {
+                implementation(composeBom)
 
-    implementation(libs.androidx.compose.animation)
-    implementation(libs.androidx.compose.foundation.layout)
-    implementation(libs.androidx.compose.material.iconsExtended)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.materialWindow)
-    implementation(libs.androidx.compose.runtime.livedata)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
-    debugImplementation(libs.androidx.compose.ui.tooling)
+                implementation(libs.kotlin.stdlib)
+                implementation(libs.kotlinx.coroutines.android)
 
-    implementation(libs.accompanist.swiperefresh)
-    implementation(libs.accompanist.systemuicontroller)
+                implementation(libs.androidx.compose.animation)
+                implementation(libs.androidx.compose.foundation.layout)
+                implementation(libs.androidx.compose.material.iconsExtended)
+                implementation(libs.androidx.compose.material3)
+                implementation(libs.androidx.compose.materialWindow)
+                implementation(libs.androidx.compose.runtime.livedata)
+                implementation(libs.androidx.compose.ui.tooling.preview)
 
-    implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.activity.compose)
+                implementation(libs.accompanist.swiperefresh)
+                implementation(libs.accompanist.systemuicontroller)
 
-    implementation(libs.androidx.glance)
-    implementation(libs.androidx.glance.appwidget)
-    implementation(libs.androidx.glance.material3)
+                implementation(libs.androidx.appcompat)
+                implementation(libs.androidx.activity.ktx)
+                implementation(libs.androidx.core.ktx)
+                implementation(libs.androidx.activity.compose)
 
-    implementation(libs.androidx.lifecycle.viewmodel.ktx)
-    implementation(libs.androidx.lifecycle.viewmodel.savedstate)
-    implementation(libs.androidx.lifecycle.livedata.ktx)
-    implementation(libs.androidx.lifecycle.viewModelCompose)
-    implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.window)
+                implementation(libs.androidx.glance)
+                implementation(libs.androidx.glance.appwidget)
+                implementation(libs.androidx.glance.material3)
 
-    androidTestImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.test.core)
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.espresso.core)
-    androidTestImplementation(libs.androidx.test.rules)
-    androidTestImplementation(libs.androidx.test.ext.junit)
-    androidTestImplementation(libs.kotlinx.coroutines.test)
-    androidTestImplementation(libs.androidx.compose.ui.test)
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+                implementation(libs.androidx.lifecycle.viewmodel.ktx)
+                implementation(libs.androidx.lifecycle.viewmodel.savedstate)
+                implementation(libs.androidx.lifecycle.livedata.ktx)
+                implementation(libs.androidx.lifecycle.viewModelCompose)
+                implementation(libs.androidx.lifecycle.runtime.compose)
+                implementation(libs.androidx.navigation.compose)
+                implementation(libs.androidx.window)
+            }
+        }
+        val androidDebug by creating {
+            dependencies {
+                implementation(libs.androidx.compose.ui.test.manifest)
+                implementation(libs.androidx.compose.ui.tooling)
+            }
+        }
+        val commonTest by getting {
+            dependencies {
+                implementation(libs.junit)
+            }
+        }
+        val androidSharedTest by creating {
+            dependsOn(commonTest)
+            dependencies {
+                implementation(composeBom)
+
+                implementation(libs.junit)
+                implementation(libs.androidx.test.core)
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.espresso.core)
+                implementation(libs.androidx.test.rules)
+                implementation(libs.androidx.test.ext.junit)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.androidx.compose.ui.test)
+                implementation(libs.androidx.compose.ui.test.junit4)
+            }
+        }
+        val androidUnitTest by getting {
+            dependsOn(androidSharedTest)
+            dependencies {
+                implementation(libs.robolectric)
+            }
+        }
+        val androidInstrumentedTest by getting {
+            dependsOn(androidSharedTest)
+        }
+    }
 }
 
