@@ -54,6 +54,7 @@ robolectric = "4.13"
 roborazzi = "1.12.0"
 rome = "1.18.0"
 room = "2.6.0"
+screenshot = "0.0.1-alpha08"
 secrets = "2.0.1"
 # @keep
 targetSdk = "33"
@@ -166,6 +167,8 @@ rometools-modules = { module = "com.rometools:rome-modules", version.ref = "rome
 rometools-rome = { module = "com.rometools:rome", version.ref = "rome" }
 
 [plugins]
+screenshot = { id = "com.android.compose.screenshot", version.ref = "screenshot"}
+
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }
 android-library = { id = "com.android.library", version.ref = "androidGradlePlugin" }
 android-test = { id = "com.android.test", version.ref = "androidGradlePlugin" }

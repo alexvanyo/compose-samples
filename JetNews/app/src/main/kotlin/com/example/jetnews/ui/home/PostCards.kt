@@ -16,8 +16,6 @@
 
 package com.example.jetnews.ui.home
 
-import android.content.res.Configuration.UI_MODE_NIGHT_YES
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,12 +23,9 @@ import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Arrangement.Horizontal
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,7 +33,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -48,22 +42,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.LayoutModifier
-import androidx.compose.ui.layout.Measurable
-import androidx.compose.ui.layout.MeasurePolicy
-import androidx.compose.ui.layout.MeasureResult
-import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.painterResource
@@ -74,11 +61,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.offset
 import com.example.jetnews.R
@@ -88,6 +71,8 @@ import com.example.jetnews.ui.theme.JetnewsTheme
 import com.example.jetnews.ui.utils.BookmarkButton
 import kotlin.math.max
 import kotlin.math.roundToInt
+
+//region start
 
 @Composable
 fun AuthorAndReadTime(
@@ -130,7 +115,7 @@ fun PostTitle(post: Post) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PostCardSimple(
+fun PostCard(
     post: Post,
     navigateToArticle: (String) -> Unit,
     isFavorite: Boolean,
@@ -186,7 +171,7 @@ fun PostCardSimple(
         val bookmarkMeasurables = measurables[1]
         val infoMeasurables = measurables[2]
 
-        val isHorizontal = constraints.maxWidth >= 320.dp.toPx()
+        val isHorizontal = true // = constraints.maxWidth >= 320.dp.toPx()
 
         val width = constraints.maxWidth
         val height: Int
@@ -335,7 +320,7 @@ fun PostCardHistory(post: Post, navigateToArticle: (String) -> Unit) {
     }
 }
 
-@Preview("Bookmark Button")
+//@Preview("Bookmark Button")
 @Composable
 fun BookmarkButtonPreview() {
     JetnewsTheme {
@@ -345,7 +330,7 @@ fun BookmarkButtonPreview() {
     }
 }
 
-@Preview("Bookmark Button Bookmarked")
+//@Preview("Bookmark Button Bookmarked")
 @Composable
 fun BookmarkButtonBookmarkedPreview() {
     JetnewsTheme {
@@ -355,22 +340,29 @@ fun BookmarkButtonBookmarkedPreview() {
     }
 }
 
-@Preview("Simple post card", widthDp = 300)
-@Preview("Simple post card", widthDp = 500)
-@Preview("Simple post card", widthDp = 500, fontScale = 1.5f)
-@Preview("Simple post card", widthDp = 600)
+//endregion
+
+@Preview(widthDp = 200)
+@Preview(widthDp = 300)
+@Preview(widthDp = 400)
+@Preview(widthDp = 500)
+annotation class PreviewWidths
+
+@PreviewWidths
 @Composable
-fun SimplePostPreview() {
+fun PostCardPreview() {
     JetnewsTheme {
         Surface {
             Box {
-                PostCardSimple(post3, {}, false, {})
+                PostCard(post3, {}, false, {})
             }
         }
     }
 }
 
-@Preview(locale = "ar")
+//region b
+
+//@Preview(locale = "ar")
 @Composable
 fun AnchoredDraggableTest() {
 
@@ -416,7 +408,7 @@ fun AnchoredDraggableTest() {
 
 }
 
-@Preview("Post History card")
+//@Preview("Post History card")
 @Composable
 fun HistoryPostPreview() {
     JetnewsTheme {
@@ -425,3 +417,5 @@ fun HistoryPostPreview() {
         }
     }
 }
+
+//endregion

@@ -511,7 +511,7 @@ private fun PostListSimpleSection(
 ) {
     Column {
         posts.forEach { post ->
-            PostCardSimple(
+            PostCard(
                 post = post,
                 navigateToArticle = navigateToArticle,
                 isFavorite = favorites.contains(post.id),
